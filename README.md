@@ -33,6 +33,14 @@ Open [http://localhost:38000/](http://localhost:38000/) in your browser.
 
 - [Documentation Home](https://oqtopus-manager.readthedocs.io/)
 
+## Citation
+
+You can use the DOI to cite oqtopus-auth in your research.
+
+[![DOI](https://zenodo.org/badge/1332302235.svg)](https://doi.org/10.5281/zenodo.21908835)
+
+Citation information is also available in the [CITATION](https://github.com/oqtopus-team/oqtopus-manager/blob/main/CITATION.cff) file.
+
 ## Contact
 
 You can contact us by creating an issue in this repository or by email:
