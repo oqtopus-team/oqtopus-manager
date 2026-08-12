@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Python Project Template"
+authors:
+  - name: "OQTOPUS Team"
+version: 1.0.0
+date-released: 2026-03-18
+license: Apache-2.0
+contact:
+  - email: oqtopus-team@googlegroups.com
+    name: "OQTOPUS mailing list"
+repository-code: "https://github.com/oqtopus-team/python-project-template"
+url: "https://oqtopus-python-project-template.readthedocs.io/"
