@@ -164,3 +164,13 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# OQTOPUS Manager
+#   config.yaml is a local, environment-specific copy generated from
+#   config.yaml.example (see `make install`); only the example is tracked.
+/config/config.yaml
+#   environments.yaml is generated/updated at runtime when environments are
+#   created or deleted through the web UI.
+/config/environments.yaml
+#   Default base path for managed OQTOPUS environments (server.default_environment_base_path).
+/environments/
+

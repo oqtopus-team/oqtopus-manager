@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}{{ service }} config | {{ env.name }} | OQTOPUS Manager{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"></script>
+<style>
+  .cfg-edit-wrap {
+    position: relative;
+    min-height: calc(100vh - 22rem);
+    overflow: hidden;
+    border-radius: 0.5rem;
+    border: 1px solid #d1d5db;
+    background: #fff;
+  }
+  .cfg-edit-wrap:focus-within { border-color: #60a5fa; box-shadow: 0 0 0 1px #60a5fa; }
+  .cfg-edit-pre, .cfg-edit-ta {
+    position: absolute; inset: 0;
+    padding: 0.75rem 1rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+    box-sizing: border-box;
+    margin: 0;
+    tab-size: 2;
+  }
+  .cfg-edit-pre {
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: inherit;
+  }
+  .cfg-edit-ta {
+    resize: none;
+    background: transparent;
+    color: transparent;
+    caret-color: #374151;
+    z-index: 1;
+    border: none;
+    outline: none;
+    overflow: auto;
+    width: 100%;
+    height: 100%;
+  }
+  .cfg-diff-out {
+    height: calc(100vh - 22rem);
+    overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 0.75rem 1rem;
+    background: #f9fafb;
+    white-space: pre-wrap;
+  }
+  details.is-fullscreen {
+    position: fixed !important; inset: 0 !important;
+    z-index: 40; overflow-y: auto;
+    background: #fff; border-radius: 0 !important;
+  }
+  details.is-fullscreen summary { position: sticky; top: 0; z-index: 1; background: #f9fafb; }
+  details.is-fullscreen .cfg-edit-wrap { min-height: calc(100vh - 6rem) !important; }
+  details.is-fullscreen .cfg-diff-out { height: calc(100vh - 8rem) !important; }
+</style>
+{% endblock %}
+
+{% block page_banner %}
+<div class="relative overflow-hidden px-8 py-3" style="background: url('/assets/mv_bg.png') center/cover no-repeat; background-color: #2563eb;">
+  {% include "_banner_svg.html" %}
+  <div class="relative">
+    <a href="/backend/{{ env.name }}" class="inline-flex items-center gap-1 text-blue-200 hover:text-white text-sm mb-2 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
+      {{ env.name }}
+    </a>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-bold text-white">{{ service }}</h1>
+      <span class="px-2.5 py-1 rounded-md bg-white/20 text-white text-sm font-semibold font-mono">config</span>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% from "_editor_section.html" import editor_section %}
+
+{% block content %}
+{% if config_content is none and logging_content is none and topology_content is none %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-10 text-center">
+  <p class="text-sm text-gray-400">No configuration files found.</p>
+  <p class="text-xs text-gray-300 font-mono mt-1">{{ config_dir }}</p>
+</div>
+{% else %}
+
+<div class="space-y-6">
+
+{% if config_content is not none %}
+{{ editor_section('cfg', 'config.yaml', config_dir ~ '/config.yaml',
+    'svcconfig-' ~ env.name ~ '-' ~ service ~ '-config',
+    'code-config', 'language-yaml', config_content,
+    "downloadCode('code-config', 'config.yaml')") }}
+{% endif %}
+
+{% if logging_content is not none %}
+{{ editor_section('log', 'logging.yaml', config_dir ~ '/logging.yaml',
+    'svcconfig-' ~ env.name ~ '-' ~ service ~ '-logging',
+    'code-logging', 'language-yaml', logging_content,
+    "downloadCode('code-logging', 'logging.yaml')") }}
+{% endif %}
+
+{% if service == 'gateway' and topology_content is not none %}
+{{ editor_section('topo', topology_json_path.name, topology_json_path,
+    'svcconfig-' ~ env.name ~ '-' ~ service ~ '-topology',
+    'code-topology', 'language-json', topology_content,
+    "downloadCode('code-topology', '" ~ topology_json_path.name ~ "')") }}
+{% endif %}
+
+</div>
+{% endif %}
+
+{% include "environments/_modals.html" %}
+
+<script>
+  var envName     = {{ env.name | tojson }};
+  var serviceName = {{ service | tojson }};
+
+  function downloadCode(codeId, filename) {
+    var el = document.getElementById(codeId);
+    var text = el ? el.textContent : '';
+    var blob = new Blob([text], {type: 'text/plain'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  {% include "_make_editor.html" %}
+
+  document.querySelectorAll('details[data-sec]').forEach(function(el) {
+    var id = el.dataset.sec;
+    var saved = localStorage.getItem('sec:' + id);
+    if (saved === '0') el.removeAttribute('open');
+    el.addEventListener('toggle', function() {
+      localStorage.setItem('sec:' + id, el.open ? '1' : '0');
+    });
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('pre code').forEach(function(el) {
+      hljs.highlightElement(el);
+    });
+  });
+
+  {% if config_content is not none %}
+  var cfgEditor = makeEditor({
+    rawContent: {{ config_content | tojson }},
+    lockTimeoutSec: {{ lock_timeout_sec }},
+    baseUrl: '/backend/' + envName + '/services/' + serviceName + '/config/config',
+    detailsId: 'details-cfg',
+    viewId: 'cfg-view',    editId: 'cfg-edit',    diffId: 'cfg-diff',
+    editPreId: 'cfg-edit-pre', editTaId: 'cfg-edit-ta', diffOutId: 'cfg-diff-out',
+    editBtnId: 'cfg-edit-btn', previewBtnId: 'cfg-preview-btn', cancelBtnId: 'cfg-cancel-btn',
+    dlBtnId: 'cfg-download-btn',
+    badgeId: 'cfg-lock-badge', badgeTextId: 'cfg-lock-badge-text', fuBtnId: 'cfg-force-unlock-btn',
+    fsExpandId: 'cfg-fs-expand', fsCollapseId: 'cfg-fs-collapse',
+    releaseDiffBtnId: 'cfg-release-diff-btn', releaseDiffId: 'cfg-release-diff',
+    releaseDiffOutId: 'cfg-release-diff-out', releaseDiffPathId: 'cfg-release-diff-path',
+    subtitleId: 'cfg-subtitle',
+  });
+  {% if config_is_locked %}
+  cfgEditor.showLockBadgeOther({{ config_locked_since | tojson }}, {{ config_locked_since_ts }});
+  {% endif %}
+  {% endif %}
+
+  {% if logging_content is not none %}
+  var logEditor = makeEditor({
+    rawContent: {{ logging_content | tojson }},
+    lockTimeoutSec: {{ lock_timeout_sec }},
+    baseUrl: '/backend/' + envName + '/services/' + serviceName + '/config/logging',
+    detailsId: 'details-log',
+    viewId: 'log-view',    editId: 'log-edit',    diffId: 'log-diff',
+    editPreId: 'log-edit-pre', editTaId: 'log-edit-ta', diffOutId: 'log-diff-out',
+    editBtnId: 'log-edit-btn', previewBtnId: 'log-preview-btn', cancelBtnId: 'log-cancel-btn',
+    dlBtnId: 'log-download-btn',
+    badgeId: 'log-lock-badge', badgeTextId: 'log-lock-badge-text', fuBtnId: 'log-force-unlock-btn',
+    fsExpandId: 'log-fs-expand', fsCollapseId: 'log-fs-collapse',
+    releaseDiffBtnId: 'log-release-diff-btn', releaseDiffId: 'log-release-diff',
+    releaseDiffOutId: 'log-release-diff-out', releaseDiffPathId: 'log-release-diff-path',
+    subtitleId: 'log-subtitle',
+  });
+  {% if logging_is_locked %}
+  logEditor.showLockBadgeOther({{ logging_locked_since | tojson }}, {{ logging_locked_since_ts }});
+  {% endif %}
+  {% endif %}
+
+  {% if service == 'gateway' and topology_content is not none %}
+  var topoEditor = makeEditor({
+    rawContent: {{ topology_content | tojson }},
+    lockTimeoutSec: {{ lock_timeout_sec }},
+    language: 'json',
+    baseUrl: '/backend/' + envName + '/services/gateway/topology-json',
+    detailsId: 'details-topo',
+    viewId: 'topo-view',    editId: 'topo-edit',    diffId: 'topo-diff',
+    editPreId: 'topo-edit-pre', editTaId: 'topo-edit-ta', diffOutId: 'topo-diff-out',
+    editBtnId: 'topo-edit-btn', previewBtnId: 'topo-preview-btn', cancelBtnId: 'topo-cancel-btn',
+    dlBtnId: 'topo-download-btn',
+    badgeId: 'topo-lock-badge', badgeTextId: 'topo-lock-badge-text', fuBtnId: 'topo-force-unlock-btn',
+    fsExpandId: 'topo-fs-expand', fsCollapseId: 'topo-fs-collapse',
+    releaseDiffBtnId: 'topo-release-diff-btn', releaseDiffId: 'topo-release-diff',
+    releaseDiffOutId: 'topo-release-diff-out', releaseDiffPathId: 'topo-release-diff-path',
+    subtitleId: 'topo-subtitle',
+  });
+  {% if topology_is_locked %}
+  topoEditor.showLockBadgeOther({{ topology_locked_since | tojson }}, {{ topology_locked_since_ts }});
+  {% endif %}
+  {% endif %}
+</script>
+{% endblock %}

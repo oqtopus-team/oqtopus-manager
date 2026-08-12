@@ -1,0 +1,136 @@
+function _formatTs(ts) {
+  var d = new Date(ts * 1000);
+  var pad = function(n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+    ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _renderDiff(lines) {
+  return lines.map(function(item) {
+    if (item.t==='+') return '<div class="bg-green-50 text-green-800 flex"><span class="select-none text-green-400 w-4 flex-shrink-0">+</span><span>' + _escHtml(item.l) + '</span></div>';
+    if (item.t==='-') return '<div class="bg-red-50 text-red-800 flex"><span class="select-none text-red-400 w-4 flex-shrink-0">-</span><span>' + _escHtml(item.l) + '</span></div>';
+    return '<div class="text-gray-600 flex"><span class="select-none text-gray-300 w-4 flex-shrink-0"> </span><span>' + _escHtml(item.l) + '</span></div>';
+  }).join('');
+}
+
+function _computeDiff(oldStr, newStr) {
+  var result = [];
+  Diff.diffLines(oldStr, newStr).forEach(function(hunk) {
+    var lines = hunk.value.split('\n');
+    if (lines[lines.length - 1] === '') lines.pop();
+    var t = hunk.added ? '+' : hunk.removed ? '-' : '=';
+    lines.forEach(function(line) { result.push({t: t, l: line}); });
+  });
+  return result;
+}
+
+function makeEditor(o) {
+  var raw = o.rawContent, lang = o.language || 'yaml', baseUrl = o.baseUrl, timeoutSec = o.lockTimeoutSec;
+  var details    = document.getElementById(o.detailsId);
+  var viewEl     = document.getElementById(o.viewId);
+  var editEl     = document.getElementById(o.editId);
+  var diffEl     = document.getElementById(o.diffId);
+  var editPre    = document.getElementById(o.editPreId);
+  var editTa     = document.getElementById(o.editTaId);
+  var diffOut    = document.getElementById(o.diffOutId);
+  var editBtn    = document.getElementById(o.editBtnId);
+  var previewBtn = document.getElementById(o.previewBtnId);
+  var cancelBtn  = document.getElementById(o.cancelBtnId);
+  var dlBtn      = document.getElementById(o.dlBtnId);
+  var badge            = document.getElementById(o.badgeId);
+  var badgeText        = document.getElementById(o.badgeTextId);
+  var fuBtn            = document.getElementById(o.fuBtnId);
+  var releaseDiffBtn   = document.getElementById(o.releaseDiffBtnId);
+  var releaseDiffEl    = document.getElementById(o.releaseDiffId);
+  var releaseDiffOut   = document.getElementById(o.releaseDiffOutId);
+  var releaseDiffPathEl = document.getElementById(o.releaseDiffPathId);
+  var subtitleEl = document.getElementById(o.subtitleId);
+  var lockToken = null, lockTs = null, lockSince = null, timer = null;
+
+  function _updateBadge() {
+    if (!lockTs) return;
+    var rem = Math.max(0, Math.floor(timeoutSec - (Date.now()/1000 - lockTs)));
+    badgeText.textContent = 'Locked since ' + lockSince + ' · ' + rem + 's remaining';
+    if (rem === 0) { _stopTimer(); if (!lockToken) { fuBtn.classList.add('hidden'); editBtn.classList.remove('hidden'); if (releaseDiffBtn) releaseDiffBtn.classList.remove('hidden'); } }
+  }
+  function _startTimer(since, ts) { lockSince = since; lockTs = ts; _updateBadge(); timer = setInterval(_updateBadge, 1000); badge.classList.remove('hidden'); }
+  function _stopTimer() { clearInterval(timer); timer = null; lockTs = null; badge.classList.add('hidden'); }
+  function showLockBadgeOther(since, ts) { editBtn.classList.add('hidden'); fuBtn.classList.remove('hidden'); _startTimer(since, ts); }
+  function _syncHL() { editPre.innerHTML = hljs.highlight(editTa.value, {language: lang}).value + '\n'; }
+  function _enterEdit(token, ts) {
+    lockToken = token; editBtn.classList.add('hidden'); if (releaseDiffBtn) releaseDiffBtn.classList.add('hidden'); dlBtn.classList.add('hidden');
+    previewBtn.classList.remove('hidden'); cancelBtn.classList.remove('hidden');
+    _startTimer(_formatTs(ts), ts); viewEl.classList.add('hidden'); editEl.classList.remove('hidden');
+    editTa.value = raw; _syncHL(); editTa.focus();
+  }
+  function startEdit() {
+    fetch(baseUrl + '/lock', {method: 'POST'}).then(function(r) { return r.json(); })
+      .then(function(d) { if (d.ok) { _enterEdit(d.token, d.acquired_ts); } else { showLockBadgeOther(d.locked_since, d.locked_since_ts); } });
+  }
+  function _doCancel() {
+    fetch(baseUrl + '/unlock', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:lockToken})}).finally(function() {
+      lockToken = null; _stopTimer(); fuBtn.classList.add('hidden'); editBtn.classList.remove('hidden'); if (releaseDiffBtn) releaseDiffBtn.classList.remove('hidden');
+      previewBtn.classList.add('hidden'); cancelBtn.classList.add('hidden'); dlBtn.classList.remove('hidden');
+      editEl.classList.add('hidden'); diffEl.classList.add('hidden'); viewEl.classList.remove('hidden');
+    });
+  }
+  function cancelEdit() { if (editTa.value !== raw) { _discardCb = _doCancel; document.getElementById('discard-modal').classList.remove('hidden'); } else { _doCancel(); } }
+  function cancelEditFromDiff() { _discardCb = _doCancel; document.getElementById('discard-modal').classList.remove('hidden'); }
+  function openForceUnlockModal() {
+    _forceUnlockCb = function() {
+      fetch(baseUrl + '/force-unlock', {method:'POST'}).then(function(r) { return r.json(); })
+        .then(function() { _stopTimer(); fuBtn.classList.add('hidden'); return fetch(baseUrl + '/lock', {method:'POST'}); })
+        .then(function(r) { return r.json(); }).then(function(d) { if (d.ok) _enterEdit(d.token, d.acquired_ts); });
+    };
+    document.getElementById('force-unlock-modal').classList.remove('hidden');
+  }
+  function showDiff() {
+    var diff = _computeDiff(raw, editTa.value);
+    diffOut.innerHTML = _renderDiff(diff);
+    editEl.classList.add('hidden'); previewBtn.classList.add('hidden'); cancelBtn.classList.add('hidden'); diffEl.classList.remove('hidden');
+  }
+  function backToEdit() { diffEl.classList.add('hidden'); editEl.classList.remove('hidden'); previewBtn.classList.remove('hidden'); cancelBtn.classList.remove('hidden'); }
+  function confirmSave() {
+    fetch(baseUrl + '/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:lockToken, content:editTa.value})})
+      .then(function(r) { return r.json(); }).then(function(d) { if (d.ok) window.location.reload(); else alert('Save failed: ' + (d.error || 'Unknown error')); });
+  }
+  function toggleFullscreen() {
+    var fs = details.classList.toggle('is-fullscreen');
+    document.getElementById(o.fsExpandId).classList.toggle('hidden', fs);
+    document.getElementById(o.fsCollapseId).classList.toggle('hidden', !fs);
+    if (fs && !details.open) details.setAttribute('open', '');
+  }
+  function showReleaseDiff() {
+    if (releaseDiffBtn) releaseDiffBtn.classList.add('hidden'); editBtn.classList.add('hidden'); dlBtn.classList.add('hidden');
+    fetch(baseUrl + '/release-diff').then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (releaseDiffPathEl) releaseDiffPathEl.textContent = d.installed_path || '';
+        if (subtitleEl) { subtitleEl.classList.remove('text-gray-400'); subtitleEl.classList.add('bg-green-50', 'text-green-800', 'px-2', 'py-0.5', 'rounded', 'w-fit'); }
+        if (!d.installed_content) {
+          if (releaseDiffOut) releaseDiffOut.innerHTML = '<div class="py-6 text-center text-sm text-gray-400">Installed config file not found.</div>';
+        } else {
+          var diff = _computeDiff(d.installed_content, raw);
+          var hasDiff = diff.some(function(item) { return item.t !== '='; });
+          if (releaseDiffOut) releaseDiffOut.innerHTML = hasDiff ? _renderDiff(diff) : '<div class="py-6 text-center text-sm text-gray-400">No differences found.</div>';
+        }
+        viewEl.classList.add('hidden'); if (releaseDiffEl) releaseDiffEl.classList.remove('hidden');
+      });
+  }
+  function hideReleaseDiff() {
+    if (releaseDiffEl) releaseDiffEl.classList.add('hidden'); viewEl.classList.remove('hidden');
+    if (releaseDiffBtn) releaseDiffBtn.classList.remove('hidden'); dlBtn.classList.remove('hidden');
+    if (subtitleEl) { subtitleEl.classList.add('text-gray-400'); subtitleEl.classList.remove('bg-green-50', 'text-green-800', 'px-2', 'py-0.5', 'rounded', 'w-fit'); }
+    // Restore edit button only when no other user's lock is active
+    if (fuBtn.classList.contains('hidden')) { editBtn.classList.remove('hidden'); }
+  }
+  editTa.addEventListener('input', _syncHL);
+  editTa.addEventListener('scroll', function() { editPre.scrollTop = editTa.scrollTop; editPre.scrollLeft = editTa.scrollLeft; });
+  window.addEventListener('beforeunload', function() {
+    if (lockToken) fetch(baseUrl + '/unlock', {method:'POST', keepalive:true, headers:{'Content-Type':'application/json'}, body:JSON.stringify({token:lockToken})});
+  });
+  return {startEdit, cancelEdit, cancelEditFromDiff, openForceUnlockModal, showDiff, backToEdit, confirmSave, toggleFullscreen, showLockBadgeOther, showReleaseDiff, hideReleaseDiff};
+}

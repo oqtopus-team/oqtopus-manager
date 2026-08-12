@@ -1,0 +1,565 @@
+{% extends "base.html" %}
+{% block title %}{{ env.name }} | OQTOPUS Manager{% endblock %}
+
+{% block extra_head %}
+<style>
+  #console-area.is-fullscreen {
+    position: fixed; inset: 0; z-index: 50; padding: 0;
+  }
+  #console-area.is-fullscreen > div {
+    height: 100%; display: flex; flex-direction: column;
+    border-radius: 0; overflow: hidden;
+  }
+  #console-area.is-fullscreen #terminal {
+    flex: 1; height: auto !important;
+  }
+</style>
+{% endblock %}
+
+{% block page_banner %}
+<div class="relative overflow-hidden px-8 py-8" style="background: url('/assets/mv_bg.png') center/cover no-repeat; background-color: #2563eb;">
+  {% include "_banner_svg.html" %}
+  <div class="relative">
+    <a href="/backend" class="inline-flex items-center gap-1 text-blue-200 hover:text-white text-sm mb-2 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
+      Backend
+    </a>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-bold text-white">{{ env.name }}</h1>
+      <button
+        onclick="document.getElementById('delete-modal').classList.remove('hidden')"
+        class="btn btn-sm gap-1.5 bg-white text-red-600 border-red-300 hover:bg-red-50">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
+        </svg>
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+{# Settings panel #}
+<details data-sec="sec-settings" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-5 group" open>
+  <summary class="flex items-center gap-2 px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors border-b border-transparent group-open:border-gray-200">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
+    <span class="text-sm font-semibold text-[#4887FA]">Settings</span>
+  </summary>
+  {% include "environments/_settings_dl.html" %}
+</details>
+
+{# Command cards grid #}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+
+  {# Components | always visible #}
+  <details id="card-components" data-sec="sec-components"
+           class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group {% if not all_versions_installed %}lg:col-span-2{% endif %}" open>
+    <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <div>
+        <h2 class="text-sm font-semibold text-[#4887FA]">Components</h2>
+        <p class="text-xs text-gray-400 mt-0.5">Manage engine, tranqu, and gateway component versions.</p>
+      </div>
+    </summary>
+    <div class="px-5 pb-5 pt-4">
+      <div class="flex flex-wrap items-end gap-3 mb-3">
+        <div class="form-control">
+          <label class="label py-0.5" for="comp"><span class="label-text text-xs text-gray-500">Component</span></label>
+          <select id="comp" class="select select-bordered select-sm">
+            <option value="all">all</option>
+            <option value="engine">engine</option>
+            <option value="tranqu">tranqu</option>
+            <option value="gateway">gateway</option>
+          </select>
+          <label class="label py-0"><span class="label-text-alt">&nbsp;</span></label>
+        </div>
+        <div class="form-control w-40">
+          <label class="label py-0.5" for="ver"><span class="label-text text-xs text-gray-500">Version <span class="text-gray-300">(optional)</span></span></label>
+          <div id="ver-wrap">
+            <input id="ver" type="text" placeholder="latest" class="input input-bordered input-sm w-40" />
+          </div>
+          <label class="label py-0">
+            <span class="label-text-alt text-gray-400 whitespace-nowrap">Click Versions to pick.</span>
+          </label>
+        </div>
+        <div class="flex flex-col">
+          <div class="flex gap-1 items-center">
+            <button id="btn-versions"  onclick="fetchVersions(this)"              class="btn btn-sm btn-outline" disabled>Versions</button>
+            <button id="btn-install"   onclick="runComponentCmd('install', this)"   class="btn btn-sm btn-outline btn-success">Install</button>
+            <label id="chk-skip-wrap" style="display:none" class="inline-flex items-center gap-1 text-xs text-gray-500 px-1 cursor-pointer">
+              <input type="checkbox" id="chk-skip-sse-build" class="checkbox checkbox-xs">
+              <span>skip SSE build</span>
+              <span class="text-gray-400">(install only)</span>
+            </label>
+            <button id="btn-uninstall" onclick="runComponentCmd('uninstall', this)" class="btn btn-sm btn-outline btn-error">Uninstall</button>
+          </div>
+          <label class="label py-0"><span class="label-text-alt">&nbsp;</span></label>
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
+        <button id="btn-build" onclick="runCmd('build', {}, 'build sse-runtime', this)"
+                class="btn btn-sm btn-outline"
+                {% if not meta.get('engine_version') %}disabled{% endif %}>Build SSE Runtime</button>
+      </div>
+    </div>
+  </details>
+
+  {# Ops sections: shown only when all three versions are installed #}
+  <div id="ops-sections" style="display: {% if all_versions_installed %}contents{% else %}none{% endif %}">
+
+  {# Device Status #}
+  <details data-sec="sec-device" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group" open>
+    <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-[#4887FA]">Device Status</h2>
+    </summary>
+    <div>
+      <div class="flex justify-start px-5 pt-3 pb-1">
+        <button onclick="fetchDeviceStatus(this)" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+      <div id="device-status-wrap"><p class="text-sm text-gray-400 px-5 py-2">Loading…</p></div>
+    </div>
+  </details>
+
+  {# Status | full width #}
+  <details data-sec="sec-status" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group lg:col-span-2" open>
+    <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-[#4887FA]">Service Status</h2>
+    </summary>
+    <div>
+      <table class="w-full" style="border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td class="px-5 py-1.5" style="width:9rem">
+              <button onclick="fetchStatus(this)" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+              </button>
+            </td>
+            <td style="width:1px; white-space:nowrap"></td>
+            <td class="py-1.5">
+              <div class="flex gap-1 justify-end">
+                <button onclick="runServiceCmdFor('start', 'all', this)"   class="btn btn-xs btn-outline btn-success" style="width:6rem">Start all</button>
+                <button id="btn-stop-all"    onclick="runServiceCmdFor('stop', 'all', this)"    class="btn btn-xs btn-outline btn-error" style="width:6rem">Stop all</button>
+                <button id="btn-restart-all" onclick="runServiceCmdFor('restart', 'all', this)" class="btn btn-xs btn-outline" style="width:6rem">Restart all</button>
+              </div>
+            </td>
+            <td class="py-1.5 pl-3 pr-5" style="width:1px; white-space:nowrap">
+              <a href="/backend/{{ env.name }}/dotenv" class="btn btn-xs btn-outline" style="width:4rem">.env</a>
+            </td>
+          </tr>
+        </thead>
+        <tbody id="status-table-wrap">
+          <tr><td colspan="4" class="px-5 py-2 text-sm text-gray-400">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  </div>{# /ops-sections #}
+
+</div>
+
+{# Console panel #}
+<div id="console-area" class="hidden">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+      <div class="flex items-center gap-2 min-w-0">
+        <h2 class="text-sm font-semibold text-[#4887FA] flex-shrink-0">Output</h2>
+        <code id="console-cmd" class="text-xs text-gray-400 font-mono truncate"></code>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0 ml-4">
+        <span id="console-status" class="text-xs text-gray-400"></span>
+        <button onclick="oqCopyToClipboard(document.getElementById('terminal').textContent, this)" class="btn btn-ghost btn-xs text-gray-400" title="Copy output">
+          <svg class="oq-icon-copy h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <svg class="oq-icon-copied h-4 w-4 hidden text-green-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </button>
+        <button onclick="toggleFullscreen()" class="btn btn-ghost btn-xs text-gray-400" title="Fullscreen">
+          <svg id="icon-expand" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+          <svg id="icon-collapse" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+          </svg>
+        </button>
+        <button onclick="clearConsole()" class="btn btn-ghost btn-xs text-gray-400">Clear</button>
+      </div>
+    </div>
+    <div id="terminal"
+         class="font-mono text-sm bg-gray-950 text-green-400 p-4 h-72 overflow-y-auto whitespace-pre-wrap leading-relaxed"></div>
+  </div>
+</div>
+
+{# Delete confirmation modal #}
+<div id="delete-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <h3 class="text-base font-semibold text-gray-800 mb-2">Delete Environment</h3>
+    <p class="text-sm text-gray-500 mb-6">Delete environment <span class="font-medium text-gray-700">{{ env.name }}</span>? This action cannot be undone.</p>
+    <div class="flex justify-end gap-3">
+      <button onclick="document.getElementById('delete-modal').classList.add('hidden')" class="btn btn-sm btn-outline">Cancel</button>
+      <button
+        onclick="confirmDelete(this, '/backend/' + envName)"
+        class="btn btn-sm gap-1.5" style="background:#fff; border:1px solid #dc2626; color:#dc2626;">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
+        </svg>
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function confirmDelete(btn, url) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="loading loading-spinner loading-sm"></span> Deleting…';
+  htmx.ajax('DELETE', url, { target: 'body', swap: 'innerHTML' });
+}
+
+var envName = {{ env.name | tojson }};
+
+(function () {
+  document.querySelectorAll('details[data-sec]').forEach(function (el) {
+    var id    = el.dataset.sec;
+    var saved = localStorage.getItem('sec:' + id);
+    if (saved === '0') el.removeAttribute('open');
+    el.addEventListener('toggle', function () {
+      localStorage.setItem('sec:' + id, el.open ? '1' : '0');
+    });
+  });
+
+  function syncCompState() {
+    var comp  = document.getElementById('comp').value;
+    var isAll = comp === 'all';
+    var ver   = document.getElementById('ver');
+    ['btn-versions', 'btn-update', 'btn-uninstall'].forEach(function (btnId) {
+      var b = document.getElementById(btnId);
+      if (b) b.disabled = isAll;
+    });
+    ver.value    = isAll ? '' : ver.value;
+    ver.disabled = isAll;
+    var skipWrap = document.getElementById('chk-skip-wrap');
+    var isEngine = comp === 'engine';
+    skipWrap.style.display = isEngine ? 'inline-flex' : 'none';
+    if (!isEngine) document.getElementById('chk-skip-sse-build').checked = false;
+  }
+  document.getElementById('comp').addEventListener('change', syncCompState);
+  syncCompState();
+
+  function updateOpsSections() {
+    var allInstalled = ['engine_version', 'tranqu_version', 'gateway_version'].every(function (key) {
+      var row = document.querySelector('[data-ver="' + key + '"]');
+      return row && row.querySelector('[data-installed]');
+    });
+    var opsEl    = document.getElementById('ops-sections');
+    var cardComp = document.getElementById('card-components');
+    var buildBtn = document.getElementById('btn-build');
+    var wasHidden = opsEl && opsEl.style.display === 'none';
+    if (opsEl)    opsEl.style.display = allInstalled ? 'contents' : 'none';
+    if (cardComp) cardComp.classList.toggle('lg:col-span-2', !allInstalled);
+    if (buildBtn) {
+      var hasEngine = !!document.querySelector('[data-ver="engine_version"] [data-installed]');
+      buildBtn.disabled = !hasEngine;
+    }
+    if (allInstalled && wasHidden) {
+      window.fetchStatus(null);
+      window.fetchDeviceStatus(null);
+    }
+  }
+
+  var terminal      = document.getElementById('terminal');
+  var consoleArea   = document.getElementById('console-area');
+  var consoleCmd    = document.getElementById('console-cmd');
+  var consoleStatus = document.getElementById('console-status');
+  var currentEs     = null;
+  var activeBtn     = null;
+
+  function setBtnLoading(btn) {
+    btn.disabled = true;
+    var sp = document.createElement('span');
+    sp.className = 'loading loading-spinner loading-xs';
+    btn.prepend(sp);
+  }
+
+  function resetBtn(btn) {
+    if (!btn) return;
+    btn.disabled = false;
+    var sp = btn.querySelector('.loading');
+    if (sp) sp.remove();
+  }
+
+  function refreshSettings() {
+    fetch('/backend/' + envName + '/settings-partial')
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var dl = document.getElementById('settings-dl');
+        if (dl) {
+          var tmp = document.createElement('div');
+          tmp.innerHTML = html.trim();
+          dl.replaceWith(tmp.firstElementChild);
+        }
+        updateOpsSections();
+      });
+  }
+
+  function startStream(url, label, btnEl, onSuccess, onFinally) {
+    if (currentEs) currentEs.close();
+    resetBtn(activeBtn);
+    activeBtn = btnEl;
+    setBtnLoading(btnEl);
+
+    consoleArea.classList.remove('hidden');
+    terminal.textContent = '';
+    consoleCmd.textContent = 'oqtopus backend ' + label;
+    consoleStatus.textContent = 'Running…';
+    consoleStatus.className = 'text-xs text-gray-400';
+    consoleArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    currentEs = new EventSource(url);
+    currentEs.onmessage = function (e) {
+      terminal.textContent += e.data + '\n';
+      terminal.scrollTop = terminal.scrollHeight;
+    };
+    currentEs.addEventListener('done', function (e) {
+      currentEs.close(); currentEs = null;
+      resetBtn(activeBtn); activeBtn = null;
+      var ok = e.data === 'success';
+      consoleStatus.textContent = ok ? 'Done' : 'Failed';
+      consoleStatus.className = 'text-xs font-semibold ' + (ok ? 'text-green-600' : 'text-red-500');
+      if (ok && typeof onSuccess === 'function') onSuccess();
+      if (typeof onFinally === 'function') onFinally();
+    });
+    currentEs.onerror = function () {
+      currentEs.close(); currentEs = null;
+      resetBtn(activeBtn); activeBtn = null;
+      consoleStatus.textContent = 'Connection error';
+      consoleStatus.className = 'text-xs text-red-500 font-semibold';
+      if (typeof onFinally === 'function') onFinally();
+    };
+  }
+
+  window.runCmd = function (cmd, extra, label, btn) {
+    var params = new URLSearchParams(Object.assign({ cmd: cmd }, extra));
+    startStream('/backend/' + envName + '/stream?' + params, label, btn);
+  };
+  window.runServiceCmdFor = function (action, svc, btn) {
+    var params = new URLSearchParams({ cmd: action, service: svc });
+    startStream('/backend/' + envName + '/stream?' + params, action + ' ' + svc, btn,
+      function () { window.fetchStatus(null); });
+  };
+  window.runComponentCmd = function (action, btn) {
+    var comp = document.getElementById('comp').value;
+    var ver  = document.getElementById('ver').value.trim();
+    var skipSseBuild = action === 'install' && comp === 'engine'
+      && document.getElementById('chk-skip-sse-build').checked;
+    var params = new URLSearchParams({ cmd: action, component: comp });
+    if (ver) params.set('version', ver);
+    if (skipSseBuild) params.set('skip_sse_build', 'true');
+    var label = action + ' ' + comp + (ver ? ' ' + ver : '') + (skipSseBuild ? ' --skip-sse-build' : '');
+    var needsRefresh = (action === 'install' || action === 'update' || action === 'uninstall');
+    var compBtnIds = ['btn-versions', 'btn-install', 'btn-uninstall'];
+    compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
+    startStream('/backend/' + envName + '/stream?' + params,
+      label, btn,
+      needsRefresh ? refreshSettings : null,
+      function () {
+        compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
+        syncCompState();
+      });
+  };
+
+  var _VALID_COMP = new Set(['engine', 'tranqu', 'gateway']);
+
+  window.fetchVersions = function (btn) {
+    var comp = document.getElementById('comp').value;
+    if (!_VALID_COMP.has(comp)) return;
+    var params = new URLSearchParams({ cmd: 'versions', component: comp });
+    startStream('/backend/' + envName + '/stream?' + params, 'versions ' + comp, btn);
+    fetch('/backend/' + envName + '/component-versions?component=' + encodeURIComponent(comp))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var wrap = document.getElementById('ver-wrap');
+        var branches = data.versions.filter(function (v) { return v.startsWith('branch:'); });
+        var releases = data.versions.filter(function (v) { return !v.startsWith('branch:'); });
+        var toOpt = function (v) { return '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>'; };
+        var opts = branches.map(toOpt).join('') + '<option value="">latest</option>' + releases.map(toOpt).join('');
+        wrap.innerHTML = '<select id="ver" class="select select-bordered select-sm w-40">' + opts + '</select>';
+      })
+      .catch(function () {});
+  };
+
+  document.getElementById('comp').addEventListener('change', function () {
+    var wrap = document.getElementById('ver-wrap');
+    wrap.innerHTML = '<input id="ver" type="text" placeholder="latest" class="input input-bordered input-sm w-40" />';
+    var vBtn = document.getElementById('btn-versions');
+    if (vBtn) vBtn.disabled = !_VALID_COMP.has(this.value);
+  });
+  window.clearConsole = function () {
+    terminal.textContent = '';
+    consoleArea.classList.add('hidden');
+  };
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderStatusTable(lines) {
+    var wrap = document.getElementById('status-table-wrap');
+    if (!wrap) return;
+    var rows = [];
+    lines.forEach(function (line) {
+      var idx = line.indexOf(':');
+      if (idx > 0) rows.push({ svc: line.slice(0, idx).trim(), st: line.slice(idx + 1).trim() });
+    });
+    if (!rows.length) { wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-gray-400">No data.</td></tr>'; return; }
+    var allStopped = rows.every(function (r) { return !r.st.toLowerCase().startsWith('running'); });
+    ['btn-stop-all', 'btn-restart-all'].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (b) { b.disabled = allStopped; b.classList.toggle('btn-disabled', allStopped); }
+    });
+    var html = '';
+    rows.forEach(function (row) {
+      var running = row.st.toLowerCase().startsWith('running');
+      var stopped = !running;
+      var stCls  = running ? 'text-green-600 font-medium' : 'text-red-500 font-medium';
+      var svcEsc = escapeHtml(row.svc);
+      html += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
+        '<td class="px-5 py-1.5 text-sm font-medium text-gray-500" style="width:9rem; white-space:nowrap">' + svcEsc + '</td>' +
+        '<td class="py-1.5 text-sm ' + stCls + ' pr-4" style="width:1px; white-space:nowrap">' + escapeHtml(row.st) + '</td>' +
+        '<td class="py-1.5"><div class="flex gap-1 justify-end">' +
+        '<button onclick="runServiceCmdFor(\'start\',this.dataset.svc,this)" data-svc="' + svcEsc + '" class="btn btn-xs btn-outline btn-success' + (running ? ' btn-disabled' : '') + '" style="width:6rem"' + (running ? ' disabled' : '') + '>Start</button>' +
+        '<button onclick="runServiceCmdFor(\'stop\',this.dataset.svc,this)" data-svc="' + svcEsc + '" class="btn btn-xs btn-outline btn-error' + (stopped ? ' btn-disabled' : '') + '" style="width:6rem"' + (stopped ? ' disabled' : '') + '>Stop</button>' +
+        '<button onclick="runServiceCmdFor(\'restart\',this.dataset.svc,this)" data-svc="' + svcEsc + '" class="btn btn-xs btn-outline' + (stopped ? ' btn-disabled' : '') + '" style="width:6rem"' + (stopped ? ' disabled' : '') + '>Restart</button>' +
+        '</div></td>' +
+        '<td class="py-1.5 pl-3 pr-5" style="width:1px; white-space:nowrap"><div class="flex gap-1">' +
+        '<a href="/backend/' + envName + '/services/' + encodeURIComponent(row.svc) + '/config" class="btn btn-xs btn-outline" style="width:4rem">Config</a>' +
+        '<a href="/backend/' + envName + '/services/' + encodeURIComponent(row.svc) + '/log" class="btn btn-xs btn-outline">Log</a>' +
+        '</div></td>' +
+        '</tr>';
+    });
+    wrap.innerHTML = html;
+  }
+
+  window.fetchStatus = function (btn) {
+    var icon = btn ? btn.querySelector('svg') : null;
+    if (btn) btn.disabled = true;
+    if (icon) icon.classList.add('animate-spin');
+    var wrap = document.getElementById('status-table-wrap');
+    if (wrap) wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-gray-400">Loading…</td></tr>';
+    var lines = [];
+    var es = new EventSource('/backend/' + envName + '/stream?cmd=status');
+    es.onmessage = function (e) { if (e.data.trim()) lines.push(e.data.trim()); };
+    es.addEventListener('done', function () {
+      es.close();
+      if (btn) btn.disabled = false;
+      if (icon) icon.classList.remove('animate-spin');
+      renderStatusTable(lines);
+    });
+    es.onerror = function () {
+      es.close();
+      if (btn) btn.disabled = false;
+      if (icon) icon.classList.remove('animate-spin');
+      if (wrap) wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-red-400">Error fetching status.</td></tr>';
+    };
+  };
+
+  function renderDeviceStatusTable(lines) {
+    var wrap = document.getElementById('device-status-wrap');
+    if (!wrap) return;
+    var status = '';
+    lines.forEach(function (line) {
+      var low = line.toLowerCase();
+      if (low.includes('maintenance')) status = 'maintenance';
+      else if (low.includes('inactive'))    status = 'inactive';
+      else if (low.includes('active'))      status = 'active';
+    });
+    if (!status) {
+      wrap.innerHTML = '<p class="text-sm text-gray-400 px-5 py-2">' + escapeHtml(lines.join(' ') || 'No data.') + '</p>';
+      return;
+    }
+    var cls = status === 'active'      ? 'text-green-600 font-medium'
+            : status === 'inactive'    ? 'text-red-500 font-medium'
+            :                            'text-yellow-600 font-medium';
+    var dis = function (s) { return s === status ? ' btn-disabled" disabled' : '"'; };
+    wrap.innerHTML =
+      '<div class="divide-y divide-gray-200 pb-2">' +
+        '<div class="flex items-center px-5 py-2">' +
+          '<span class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">status</span>' +
+          '<span class="text-sm ' + cls + ' flex-1">' + escapeHtml(status) + '</span>' +
+          '<div class="flex gap-1 flex-shrink-0">' +
+            '<button onclick="setDeviceStatus(\'active\',this)"      class="btn btn-xs btn-outline btn-success' + dis('active') + '>Active</button>' +
+            '<button onclick="setDeviceStatus(\'inactive\',this)"    class="btn btn-xs btn-outline btn-error'   + dis('inactive') + '>Inactive</button>' +
+            '<button onclick="setDeviceStatus(\'maintenance\',this)" class="btn btn-xs btn-outline btn-warning' + dis('maintenance') + '>Maintenance</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  window.fetchDeviceStatus = function (btn) {
+    var icon = btn ? btn.querySelector('svg') : null;
+    if (btn) btn.disabled = true;
+    if (icon) icon.classList.add('animate-spin');
+    var wrap = document.getElementById('device-status-wrap');
+    if (wrap) wrap.innerHTML = '<p class="text-sm text-gray-400 px-5 py-2">Loading…</p>';
+    var lines = [];
+    var es = new EventSource('/backend/' + envName + '/stream?cmd=device-status-show');
+    es.onmessage = function (e) { if (e.data.trim()) lines.push(e.data.trim()); };
+    es.addEventListener('done', function () {
+      es.close();
+      if (btn) btn.disabled = false;
+      if (icon) icon.classList.remove('animate-spin');
+      renderDeviceStatusTable(lines);
+    });
+    es.onerror = function () {
+      es.close();
+      if (btn) btn.disabled = false;
+      if (icon) icon.classList.remove('animate-spin');
+      if (wrap) wrap.innerHTML = '<p class="text-sm text-red-400 px-5 py-2">Error fetching device status.</p>';
+    };
+  };
+
+  window.setDeviceStatus = function (status, btn) {
+    var params = new URLSearchParams({ cmd: 'device-status-set', status: status });
+    startStream('/backend/' + envName + '/stream?' + params, 'device-status ' + status, btn,
+      function () { window.fetchDeviceStatus(null); });
+  };
+
+  if (document.getElementById('ops-sections').style.display !== 'none') {
+    window.fetchStatus(null);
+    window.fetchDeviceStatus(null);
+  }
+
+  window.toggleFullscreen = function () {
+    var ca = document.getElementById('console-area');
+    var isFs = ca.classList.toggle('is-fullscreen');
+    document.getElementById('icon-expand').classList.toggle('hidden', isFs);
+    document.getElementById('icon-collapse').classList.toggle('hidden', !isFs);
+  };
+})();
+</script>
+{% endblock %}

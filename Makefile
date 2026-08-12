@@ -4,15 +4,19 @@ SHELL := bash
 
 .PHONY: install run format lint test verify docs-lint docs-build docs-serve help
 
-install: ## Install dependencies and configure git hooks and commit template
+install: ## Install dependencies, commit template and OQtopus CLI
 	@uv sync --all-groups
 	@if [ -d .git ]; then \
-		uv run pre-commit install; \
 		git config --local commit.template .gitmessage; \
 	fi
+	@if [ ! -f config/config.yaml ]; then \
+		cp config/config.yaml.example config/config.yaml; \
+		echo "Created config/config.yaml from config/config.yaml.example"; \
+	fi
+	@curl -LsSf https://raw.githubusercontent.com/oqtopus-team/oqtopus-cli/main/scripts/install.sh | sh
 
 run: ## Run the application
-	@uv run python -m python_project_template.app -c config/config.yaml -l config/logging.yaml
+	@uv run python -m oqtopus_manager.main -c config/config.yaml -l config/logging.yaml
 
 format: ## Run code formatting
 	@uv run ruff check --fix
@@ -30,7 +34,7 @@ test: ## Run tests
 verify: format lint test ## Run all verification steps (formatting, linting, testing)
 
 docs-lint: ## Run documentation linting
-	@uv run pymarkdownlnt scan docs
+	@uv run pymarkdownlnt scan -r docs
 
 docs-build: ## Build documentation
 	@uv run mkdocs build

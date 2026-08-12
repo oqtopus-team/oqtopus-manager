@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }} | OQTOPUS Manager{% endblock %}
+
+{% block page_banner %}
+<div class="relative overflow-hidden px-8 py-8" style="background: url('/assets/mv_bg.png') center/cover no-repeat; background-color: #2563eb;">
+  {% include "_banner_svg.html" %}
+  <div class="relative">
+    <h1 class="text-2xl font-bold text-white">{{ page_title }}</h1>
+    <p class="text-blue-100 text-sm mt-1">{{ page_description }}</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-end gap-2 mb-6">
+  {% if env_items %}
+  <button onclick="refreshAllStatus(this)"
+          class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+    </svg>
+    Refresh
+  </button>
+  {% endif %}
+  <a href="{{ url_prefix }}/new"
+     class="btn btn-primary btn-outline gap-2">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path d="M12 5v14M5 12h14"/>
+    </svg>
+    New {{ page_title }}
+  </a>
+</div>
+
+{% if env_items %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <table class="table w-full">
+    <thead>
+      <tr class="bg-gray-50">
+        <th>Name</th>
+        {% if has_device_status %}<th>Device Status</th>{% endif %}
+        <th>Service Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="env-list">
+      {% for item in env_items %}
+      {% set env = item.env %}
+      <tr class="hover:bg-gray-50 transition-colors" id="env-row-{{ env.name }}"
+          {% if item.all_installed %}data-fetch-status="{{ env.name }}"{% endif %}>
+        <td>
+          <a href="{{ url_prefix }}/{{ env.name }}"
+             class="font-semibold text-[#4887FA] hover:text-[#3672e8] hover:underline underline-offset-2">
+            {{ env.name }}
+          </a>
+        </td>
+        {% if has_device_status %}<td id="device-{{ env.name }}" class="text-sm"></td>{% endif %}
+        <td id="service-{{ env.name }}" class="text-sm"></td>
+        <td class="text-right">
+          <button
+            onclick="openDeleteModal('{{ env.name }}')"
+            class="btn btn-error btn-sm btn-outline gap-1.5">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
+            </svg>
+            Delete
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+(function () {
+  var urlPrefix = {{ url_prefix | tojson }};
+  var hasDeviceStatus = {{ has_device_status | tojson }};
+
+  function fetchEnvStatus(envName, onDone) {
+    var serviceEl = document.getElementById('service-' + envName);
+    var base = urlPrefix + '/' + encodeURIComponent(envName) + '/stream?cmd=';
+    var pending = hasDeviceStatus ? 2 : 1;
+    function checkDone() { if (--pending === 0 && onDone) onDone(); }
+
+    if (hasDeviceStatus) {
+      var deviceEl = document.getElementById('device-' + envName);
+      var deviceLines = [];
+      var des = new EventSource(base + 'device-status-show');
+      des.onmessage = function (e) { if (e.data.trim()) deviceLines.push(e.data.trim()); };
+      des.addEventListener('done', function (e) {
+        des.close(); checkDone();
+        if (e.data !== 'success' || !deviceEl) return;
+        var status = '';
+        deviceLines.forEach(function (line) {
+          var low = line.toLowerCase();
+          if (low.includes('maintenance')) status = 'maintenance';
+          else if (low.includes('inactive'))   status = 'inactive';
+          else if (low.includes('active'))     status = 'active';
+        });
+        if (status) {
+          var cls = status === 'active'   ? 'text-green-600 font-medium'
+                  : status === 'inactive' ? 'text-red-500 font-medium'
+                  :                         'text-yellow-600 font-medium';
+          deviceEl.innerHTML = '<span class="' + cls + '">' + status + '</span>';
+        }
+      });
+      des.onerror = function () { des.close(); checkDone(); };
+    }
+
+    var serviceLines = [];
+    var ses = new EventSource(base + 'status');
+    ses.onmessage = function (e) { if (e.data.trim()) serviceLines.push(e.data.trim()); };
+    ses.addEventListener('done', function (e) {
+      ses.close(); checkDone();
+      if (e.data !== 'success' || !serviceEl) return;
+      var statuses = [];
+      serviceLines.forEach(function (line) {
+        var idx = line.indexOf(':');
+        if (idx > 0) statuses.push(line.slice(idx + 1).trim());
+      });
+      if (statuses.length) {
+        var running = statuses.filter(function (s) { return s.toLowerCase().startsWith('running'); }).length;
+        var cls = running === statuses.length ? 'text-green-600 font-medium'
+                : running > 0               ? 'text-yellow-600 font-medium'
+                :                              'text-red-500 font-medium';
+        serviceEl.innerHTML = '<span class="' + cls + '">' + running + '/' + statuses.length + ' running</span>';
+      }
+    });
+    ses.onerror = function () { ses.close(); checkDone(); };
+  }
+
+  window.refreshAllStatus = function (btn) {
+    var icon = btn ? btn.querySelector('svg') : null;
+    if (btn) btn.disabled = true;
+    if (icon) icon.classList.add('animate-spin');
+    var rows = document.querySelectorAll('[data-fetch-status]');
+    var remaining = rows.length;
+    if (!remaining) {
+      if (btn) btn.disabled = false;
+      if (icon) icon.classList.remove('animate-spin');
+      return;
+    }
+    rows.forEach(function (row) {
+      var name = row.dataset.fetchStatus;
+      if (hasDeviceStatus) { var d = document.getElementById('device-' + name); if (d) d.innerHTML = ''; }
+      var s = document.getElementById('service-' + name);
+      if (s) s.innerHTML = '';
+      fetchEnvStatus(name, function () {
+        if (--remaining === 0) {
+          if (btn) btn.disabled = false;
+          if (icon) icon.classList.remove('animate-spin');
+        }
+      });
+    });
+  };
+
+  document.querySelectorAll('[data-fetch-status]').forEach(function (row) {
+    fetchEnvStatus(row.dataset.fetchStatus);
+  });
+})();
+</script>
+
+{% else %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col items-center justify-center py-20 text-center">
+  <div class="w-16 h-16 bg-[#EFF4FF] rounded-full flex items-center justify-center mb-5">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-[#4887FA] opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="2" width="20" height="8" rx="2"/>
+      <rect x="2" y="14" width="20" height="8" rx="2"/>
+      <line x1="6" y1="6" x2="6.01" y2="6"/>
+      <line x1="6" y1="18" x2="6.01" y2="18"/>
+    </svg>
+  </div>
+  <h3 class="text-base font-semibold text-gray-700 mb-1">No {{ page_title | lower }} environments yet</h3>
+  <p class="text-sm text-gray-400 mb-6">{{ page_description }}</p>
+  <a href="{{ url_prefix }}/new" class="btn btn-primary btn-outline gap-2">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path d="M12 5v14M5 12h14"/>
+    </svg>
+    New {{ page_title }}
+  </a>
+</div>
+{% endif %}
+
+{# Delete confirmation modal #}
+<div id="delete-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <h3 class="text-base font-semibold text-gray-800 mb-2">Delete Environment</h3>
+    <p class="text-sm text-gray-500 mb-6">Delete environment <span id="delete-modal-name" class="font-medium text-gray-700"></span>? This action cannot be undone.</p>
+    <div class="flex justify-end gap-3">
+      <button onclick="document.getElementById('delete-modal').classList.add('hidden')" class="btn btn-sm btn-outline">Cancel</button>
+      <button id="delete-modal-confirm" class="btn btn-sm gap-1.5" style="background:#fff; border:1px solid #dc2626; color:#dc2626;">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
+        </svg>
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+<script>
+  var _listUrlPrefix = {{ url_prefix | tojson }};
+  function openDeleteModal(envName) {
+    document.getElementById('delete-modal-name').textContent = envName;
+    document.getElementById('delete-modal-confirm').onclick = function () {
+      fetch(_listUrlPrefix + '/' + encodeURIComponent(envName), { method: 'DELETE' })
+        .then(function (r) { return r.text(); })
+        .then(function (html) { document.open(); document.write(html); document.close(); });
+    };
+    document.getElementById('delete-modal').classList.remove('hidden');
+  }
+</script>
+{% endblock %}

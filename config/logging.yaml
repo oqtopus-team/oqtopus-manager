@@ -20,8 +20,20 @@ handlers:
     backupCount: 9
     encoding: utf-8
 loggers:
-  python_project_template:
+  oqtopus_manager:
     level: DEBUG
+    handlers: [console, file]
+    propagate: False
+  uvicorn:
+    level: INFO
+    handlers: [console, file]
+    propagate: False
+  uvicorn.access:
+    level: INFO
+    handlers: [console, file]
+    propagate: False
+  uvicorn.error:
+    level: INFO
     handlers: [console, file]
     propagate: False
 root:

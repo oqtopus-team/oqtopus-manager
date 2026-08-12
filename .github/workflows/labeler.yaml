@@ -4,9 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize]
     branches:
-      # Specify the default branch of your repository (e.g., main or develop)
       - main
-      # - develop
 
 #Permissions are required for PRs by dependabot.
 permissions:

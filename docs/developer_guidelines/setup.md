@@ -1,7 +1,7 @@
 
 # Development Environment Setup
 
-This guide explains how to set up the development environment for contributing to Python Project Template.  
+This guide explains how to set up the development environment for contributing to OQTOPUS Manager.  
 The project provides a **Makefile** to simplify common development tasks.
 
 ## Prerequisites
@@ -16,8 +16,8 @@ Install the following tools before starting development.
 Clone the repository:
 
 ```shell
-git clone https://github.com/oqtopus-team/python-project-template.git
-cd python-project-template
+git clone https://github.com/oqtopus-team/oqtopus-manager.git
+cd oqtopus-manager
 ```
 
 ## Project Structure
@@ -25,18 +25,20 @@ cd python-project-template
 The repository is organized as follows:
 
 ```text
-python-project-template/
-├─ src/           # Python package source code
-├─ tests/         # Test suite
-├─ docs/          # Documentation sources (MkDocs)
-├─ config/        # Example configuration files (optional)
-├─ .vscode/       # VSCode settings (optional)
-├─ .github/       # GitHub workflows and repository settings
-├─ pyproject.toml # Project configuration and dependencies
-├─ Makefile       # Development commands
-├─ mkdocs.yml     # MkDocs configuration
-├─ uv.lock        # Locked dependency versions
-└─ README.md      # Project overview
+oqtopus-manager/
+├─ src/oqtopus_manager/  # Application source code (FastAPI app, routers, templates)
+├─ tests/                # Test suite
+├─ docs/                 # Documentation sources (MkDocs)
+├─ docs_scripts/         # Documentation generation helpers (mkdocs-gen-files)
+├─ config/               # config.yaml.example and logging.yaml (config.yaml is generated locally, not tracked)
+├─ assets/               # Operator-supplied icons served at /assets (generated locally, not tracked)
+├─ .vscode/              # VSCode settings (optional)
+├─ .github/              # GitHub workflows and repository settings
+├─ pyproject.toml        # Project configuration and dependencies
+├─ Makefile              # Development commands
+├─ mkdocs.yml            # MkDocs configuration
+├─ uv.lock               # Locked dependency versions
+└─ README.md             # Project overview
 ```
 
 ## Installing Dependencies
@@ -49,9 +51,21 @@ make install
 
 This command performs the following:
 
-- Installs all dependencies via `uv`.
-- Registers pre-commit hooks to automate code quality checks.
-- Configures the Git commit message template.
+- Installs all dependencies (including the dev, test, and docs groups) via `uv`.
+- Configures the Git commit message template (see [Commit Message Format](development_flow.md#commit-message-format)).
+- Creates `config/config.yaml` from `config/config.yaml.example` if it does not already exist.
+- Installs the [OQTOPUS CLI](https://github.com/oqtopus-team/oqtopus-cli), used to manage environments.
+
+## Running the Application
+
+Start the application:
+
+```shell
+make run
+```
+
+Open [http://localhost:38000](http://localhost:38000) in your browser.
+See [Configuration](../usage/configuration.md) to customize server settings, appearance, and access control before running in a shared environment.
 
 ## Linting and Testing
 

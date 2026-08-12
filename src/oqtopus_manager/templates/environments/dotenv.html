@@ -1,0 +1,549 @@
+{% extends "base.html" %}
+{% block title %}.env | {{ env.name }} | OQTOPUS Manager{% endblock %}
+
+{% block extra_head %}
+<style>
+  .de-comment { color: #9ca3af; font-style: italic; }
+  .de-key     { color: #4887FA; }
+  .de-eq      { color: #9ca3af; }
+  .de-str     { color: #16a34a; }
+  .de-num     { color: #d97706; }
+  .de-bool    { color: #7c3aed; }
+  .de-val     { color: #374151; }
+
+  .diff-eq  { color: #9ca3af; display: block; }
+  .diff-add { background: #dcfce7; color: #166534; display: block; }
+  .diff-del { background: #fee2e2; color: #991b1b; display: block; }
+
+  #edit-box:focus-within #edit-highlight { border-color: #60a5fa; }
+
+  details.is-fullscreen {
+    position: fixed !important; inset: 0 !important;
+    z-index: 40; border-radius: 0 !important;
+    overflow-y: auto; background: #fff;
+  }
+  details.is-fullscreen #edit-box {
+    min-height: calc(100vh - 5rem) !important;
+  }
+  details.is-fullscreen #diff-output {
+    height: calc(100vh - 8rem) !important;
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/diff@5.2.0/dist/diff.min.js"></script>
+{% endblock %}
+
+{% block page_banner %}
+<div class="relative overflow-hidden px-8 py-8" style="background: url('/assets/mv_bg.png') center/cover no-repeat; background-color: #2563eb;">
+  {% include "_banner_svg.html" %}
+  <div class="relative">
+    <a href="{{ url_prefix }}/{{ env.name }}" class="inline-flex items-center gap-1 text-blue-200 hover:text-white text-sm mb-2 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
+      {{ env.name }}
+    </a>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-bold text-white font-mono">.env</h1>
+    </div>
+    <p class="text-blue-100 text-sm mt-1">Environment variables.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if dotenv_content is none %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-10 text-center">
+  <p class="text-sm text-gray-400">config/.env not found.</p>
+  <p class="text-xs text-gray-300 font-mono mt-1">{{ dotenv_path }}</p>
+</div>
+{% else %}
+<details data-sec="dotenv-{{ env.name }}" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group" open>
+  <summary class="flex items-center gap-2 px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors border-b border-transparent group-open:border-gray-200">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
+    <div class="flex-1 min-w-0">
+      <h2 class="text-sm font-semibold text-[#4887FA]">.env</h2>
+      <p id="dotenv-subtitle" class="text-xs text-gray-400 font-mono mt-0.5 truncate">{{ dotenv_path }}</p>
+    </div>
+    <div class="flex items-center gap-2 flex-shrink-0" onclick="event.stopPropagation()">
+      <span id="lock-badge" class="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1{% if not is_locked %} hidden{% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span id="lock-badge-text">{% if is_locked %}Locked since {{ locked_since }}{% endif %}</span>
+      </span>
+      <button id="force-unlock-btn" onclick="openForceUnlockModal()" class="btn btn-ghost btn-sm gap-1{% if not is_locked %} hidden{% endif %}" style="color:#dc2626;" title="Force unlock">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+        </svg>
+        Force Unlock
+      </button>
+      <button id="release-diff-btn" onclick="showReleaseDiff()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1{% if is_locked %} hidden{% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="18" cy="18" r="3"/>
+          <circle cx="6" cy="6" r="3"/>
+          <path d="M6 21V9a9 9 0 0 0 9 9"/>
+        </svg>
+        Diff with release
+      </button>
+      <button id="edit-btn" onclick="startEdit()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1{% if is_locked %} hidden{% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        Edit
+      </button>
+      <button id="preview-btn" onclick="showDiff()" class="hidden btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+        Preview &amp; Save
+      </button>
+      <button id="cancel-btn" onclick="cancelEdit()" class="hidden btn btn-ghost btn-sm text-gray-500">Cancel</button>
+      <a id="download-btn" href="{{ url_prefix }}/{{ env.name }}/dotenv/download" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download .env">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download
+      </a>
+      <button onclick="toggleFullscreen()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600" title="Fullscreen">
+        <svg id="icon-expand-fs" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+        <svg id="icon-collapse-fs" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+        </svg>
+      </button>
+    </div>
+  </summary>
+
+  <!-- View mode -->
+  <div id="view-section">
+    <pre id="code-dotenv" class="m-0 p-5 rounded-none border-0 bg-white text-sm leading-relaxed font-mono"></pre>
+  </div>
+
+  <!-- Edit mode (hidden initially) -->
+  <div id="edit-section" class="hidden">
+    <div class="p-5 pb-3">
+      <!-- Highlighted textarea: <pre> behind + <textarea> on top -->
+      <div id="edit-box" style="position: relative; min-height: calc(100vh - 22rem);">
+        <pre id="edit-highlight" aria-hidden="true"
+          class="font-mono text-sm leading-relaxed pointer-events-none"
+          style="position: absolute; inset: 0; margin: 0; padding: 0.75rem;
+                 border: 1px solid #d1d5db; border-radius: 0.5rem; background: #f8fafc;
+                 white-space: pre-wrap; word-wrap: break-word; overflow: hidden;
+                 box-sizing: border-box;"></pre>
+        <textarea id="edit-textarea"
+          class="font-mono text-sm leading-relaxed"
+          style="position: absolute; inset: 0; width: 100%; height: 100%;
+                 padding: 0.75rem; border: 1px solid transparent; border-radius: 0.5rem;
+                 background: transparent; color: transparent; caret-color: #374151;
+                 outline: none; overflow-y: auto; overflow-x: auto;
+                 white-space: pre; resize: none; box-sizing: border-box;"
+          spellcheck="false"></textarea>
+      </div>
+    </div>
+    <p id="edit-error" class="hidden text-xs text-red-600 px-5 pb-3"></p>
+  </div>
+
+  <!-- Diff preview mode (hidden initially) -->
+  <div id="diff-section" class="hidden">
+    <div class="flex items-center justify-between px-5 pt-4 pb-2">
+      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Changes</p>
+      <div class="flex items-center gap-2">
+        <button onclick="confirmSave()" class="btn btn-sm gap-1" style="background:#fff; border:1px solid #16a34a; color:#16a34a;">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Confirm Save
+        </button>
+        <button onclick="backToEdit()" class="btn btn-outline btn-sm gap-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+          Back to Edit
+        </button>
+        <button onclick="cancelEdit()" class="btn btn-error btn-sm">Cancel</button>
+        <span id="save-error" class="text-xs text-red-600 hidden ml-2"></span>
+      </div>
+    </div>
+    <div class="px-5 pb-5">
+      <pre id="diff-output" class="m-0 p-4 rounded-lg border border-gray-200 bg-gray-50 text-sm leading-relaxed font-mono overflow-auto" style="height: calc(100vh - 22rem);"></pre>
+    </div>
+  </div>
+
+  <!-- Release diff section (hidden initially) -->
+  <div id="release-diff-section" class="hidden border-t border-gray-200">
+    <div class="flex items-start justify-between px-5 pt-4 pb-2">
+      <div class="min-w-0 flex-1 space-y-1">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Diff with release</p>
+        <p id="release-diff-path" class="text-xs font-mono bg-red-50 text-red-800 px-2 py-0.5 rounded w-fit ml-6"></p>
+      </div>
+      <button onclick="hideReleaseDiff()" class="btn btn-sm btn-outline ml-4 flex-shrink-0">Close</button>
+    </div>
+    <div class="px-5 pb-5">
+      <pre id="release-diff-output" class="m-0 p-4 rounded-lg border border-gray-200 bg-gray-50 text-sm leading-relaxed font-mono overflow-auto" style="height: calc(100vh - 22rem); white-space: pre-wrap;"></pre>
+    </div>
+  </div>
+
+</details>
+
+{% include "environments/_modals.html" %}
+
+<script>
+  function toggleFullscreen() {
+    var details = document.querySelector('details[data-sec]');
+    var isFs = details.classList.toggle('is-fullscreen');
+    document.getElementById('icon-expand-fs').classList.toggle('hidden', isFs);
+    document.getElementById('icon-collapse-fs').classList.toggle('hidden', !isFs);
+    if (isFs) details.setAttribute('open', '');
+  }
+
+  document.querySelectorAll('details[data-sec]').forEach(function (el) {
+    var id = el.dataset.sec;
+    var saved = localStorage.getItem('sec:' + id);
+    if (saved === '0') el.removeAttribute('open');
+    el.addEventListener('toggle', function () {
+      localStorage.setItem('sec:' + id, el.open ? '1' : '0');
+    });
+  });
+
+  // ── Syntax highlighter ──────────────────────────────────────────────────
+
+  var rawContent = {{ dotenv_content | tojson }};
+  var envName = {{ env.name | tojson }};
+  var urlPrefix = {{ url_prefix | tojson }};
+  var lockTimeoutSec = {{ lock_timeout_sec }};
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function highlightValue(val) {
+    if (!val) return '';
+    if (/^(["']).*\1$/.test(val)) return '<span class="de-str">' + esc(val) + '</span>';
+    if (/^-?\d+(\.\d+)?$/.test(val.trim())) return '<span class="de-num">' + esc(val) + '</span>';
+    if (/^(true|false|yes|no|on|off)$/i.test(val.trim())) return '<span class="de-bool">' + esc(val) + '</span>';
+    return '<span class="de-val">' + esc(val) + '</span>';
+  }
+
+  // Find the index of an inline comment (space + # not inside quotes).
+  function findInlineCommentIdx(val) {
+    var i = 0;
+    if (i < val.length && (val[i] === '"' || val[i] === "'")) {
+      var q = val[i++];
+      while (i < val.length) {
+        if (val[i] === '\\') { i += 2; continue; }
+        if (val[i] === q) { i++; break; }
+        i++;
+      }
+    }
+    for (var j = i; j < val.length; j++) {
+      if ((val[j] === ' ' || val[j] === '\t') && j + 1 < val.length && val[j + 1] === '#') {
+        return j;
+      }
+    }
+    return -1;
+  }
+
+  function highlightLine(line) {
+    if (!line.trim()) return '';
+    if (/^\s*#/.test(line)) return '<span class="de-comment">' + esc(line) + '</span>';
+    var m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)(=)(.*)$/);
+    if (m) {
+      var val = m[3];
+      var ci = findInlineCommentIdx(val);
+      var valPart = ci >= 0 ? val.substring(0, ci) : val;
+      var cPart   = ci >= 0 ? val.substring(ci) : '';
+      return '<span class="de-key">' + esc(m[1]) + '</span>' +
+             '<span class="de-eq">=</span>' +
+             highlightValue(valPart) +
+             (cPart ? '<span class="de-comment">' + esc(cPart) + '</span>' : '');
+    }
+    return esc(line);
+  }
+
+  function buildHighlightHtml(text) {
+    // Trailing \n needs an extra blank line so the pre height stays in sync.
+    return text.split('\n').map(highlightLine).join('\n') + '\n';
+  }
+
+  // Render initial view
+  (function () {
+    document.getElementById('code-dotenv').innerHTML =
+      rawContent.split('\n').map(highlightLine).join('\n');
+  })();
+
+  // ── Edit-mode highlight backdrop ────────────────────────────────────────
+
+  function syncHighlight() {
+    var ta = document.getElementById('edit-textarea');
+    var hl = document.getElementById('edit-highlight');
+    hl.innerHTML = buildHighlightHtml(ta.value);
+    hl.scrollTop = ta.scrollTop;
+  }
+
+  function initEditListeners() {
+    var ta = document.getElementById('edit-textarea');
+    var hl = document.getElementById('edit-highlight');
+    ta.addEventListener('input', syncHighlight);
+    ta.addEventListener('scroll', function () { hl.scrollTop = ta.scrollTop; });
+  }
+
+  // ── Lock / edit state ────────────────────────────────────────────────────
+
+  var lockToken = null;
+  var countdownTimer = null;
+  var lockSinceStr = '';
+  var lockAcquiredTs = 0;
+
+  function formatNow() {
+    var d = new Date();
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+           ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  function updateCountdownBadge() {
+    var elapsed = Date.now() / 1000 - lockAcquiredTs;
+    var remaining = Math.max(0, Math.floor(lockTimeoutSec - elapsed));
+    var suffix = remaining > 0 ? ' · ' + remaining + 's remaining' : ' · expired';
+    document.getElementById('lock-badge-text').textContent = 'Locked since ' + lockSinceStr + suffix;
+    if (remaining <= 0) {
+      stopCountdown();
+      if (!lockToken) {
+        document.getElementById('lock-badge').classList.add('hidden');
+        document.getElementById('force-unlock-btn').classList.add('hidden');
+        document.getElementById('edit-btn').classList.remove('hidden');
+        document.getElementById('release-diff-btn').classList.remove('hidden');
+      }
+    }
+  }
+
+  function startCountdown(sinceStr, sinceTs) {
+    lockSinceStr = sinceStr;
+    lockAcquiredTs = sinceTs;
+    stopCountdown();
+    updateCountdownBadge();
+    countdownTimer = setInterval(updateCountdownBadge, 1000);
+  }
+
+  function stopCountdown() {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  }
+
+  // Called when someone else holds the lock (show badge + force-unlock, no edit mode)
+  function showLockBadge(sinceStr, sinceTs) {
+    document.getElementById('lock-badge').classList.remove('hidden');
+    document.getElementById('edit-btn').classList.add('hidden');
+    document.getElementById('force-unlock-btn').classList.remove('hidden');
+    startCountdown(sinceStr, sinceTs);
+  }
+
+  // Enter edit mode after lock is acquired
+  function enterEditMode(token, acquiredTs) {
+    lockToken = token;
+    // Show self-owned lock badge with countdown
+    document.getElementById('lock-badge').classList.remove('hidden');
+    document.getElementById('edit-btn').classList.add('hidden');
+    document.getElementById('release-diff-btn').classList.add('hidden');
+    document.getElementById('force-unlock-btn').classList.add('hidden');
+    document.getElementById('download-btn').classList.add('hidden');
+    document.getElementById('preview-btn').classList.remove('hidden');
+    document.getElementById('cancel-btn').classList.remove('hidden');
+    startCountdown(formatNow(), acquiredTs);
+    // Show textarea
+    var ta = document.getElementById('edit-textarea');
+    ta.value = rawContent;
+    document.getElementById('edit-highlight').innerHTML = buildHighlightHtml(rawContent);
+    document.getElementById('view-section').classList.add('hidden');
+    document.getElementById('edit-section').classList.remove('hidden');
+    document.getElementById('edit-error').classList.add('hidden');
+    initEditListeners();
+    ta.focus();
+  }
+
+  function openForceUnlockModal() {
+    _forceUnlockCb = async function () {
+      await fetch(urlPrefix + '/' + envName + '/dotenv/force-unlock', { method: 'POST' });
+      var res  = await fetch(urlPrefix + '/' + envName + '/dotenv/lock', { method: 'POST' });
+      var data = await res.json();
+      if (!data.ok) {
+        showLockBadge(data.locked_since || '?', data.locked_since_ts || Date.now() / 1000);
+        return;
+      }
+      enterEditMode(data.token, data.acquired_ts);
+    };
+    document.getElementById('force-unlock-modal').classList.remove('hidden');
+  }
+
+  async function startEdit() {
+    var res  = await fetch(urlPrefix + '/' + envName + '/dotenv/lock', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      showLockBadge(data.locked_since || '?', data.locked_since_ts || Date.now() / 1000);
+      return;
+    }
+    enterEditMode(data.token, data.acquired_ts);
+  }
+
+  function cancelEdit() {
+    var current = document.getElementById('edit-textarea').value;
+    if (current !== rawContent) {
+      _discardCb = doCancel;
+      document.getElementById('discard-modal').classList.remove('hidden');
+    } else {
+      doCancel();
+    }
+  }
+
+  async function doCancel() {
+    stopCountdown();
+    if (lockToken) {
+      await fetch(urlPrefix + '/' + envName + '/dotenv/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: lockToken }),
+      });
+      lockToken = null;
+    }
+    // Restore view mode
+    document.getElementById('edit-section').classList.add('hidden');
+    document.getElementById('diff-section').classList.add('hidden');
+    document.getElementById('view-section').classList.remove('hidden');
+    // Restore header buttons
+    document.getElementById('lock-badge').classList.add('hidden');
+    document.getElementById('force-unlock-btn').classList.add('hidden');
+    document.getElementById('preview-btn').classList.add('hidden');
+    document.getElementById('cancel-btn').classList.add('hidden');
+    document.getElementById('edit-btn').classList.remove('hidden');
+    document.getElementById('release-diff-btn').classList.remove('hidden');
+    document.getElementById('download-btn').classList.remove('hidden');
+  }
+
+  // ── Release diff ─────────────────────────────────────────────────────────
+
+  async function showReleaseDiff() {
+    document.getElementById('release-diff-btn').classList.add('hidden');
+    document.getElementById('edit-btn').classList.add('hidden');
+    document.getElementById('download-btn').classList.add('hidden');
+    var res = await fetch(urlPrefix + '/' + envName + '/dotenv/release-diff');
+    var d = await res.json();
+    document.getElementById('release-diff-path').textContent = d.installed_path || '';
+    var subtitle = document.getElementById('dotenv-subtitle');
+    if (subtitle) { subtitle.classList.remove('text-gray-400'); subtitle.classList.add('bg-green-50', 'text-green-800', 'px-2', 'py-0.5', 'rounded', 'w-fit'); }
+    var out = document.getElementById('release-diff-output');
+    if (!d.installed_content) {
+      out.innerHTML = '<span class="diff-eq">  Template file not found.</span>';
+    } else {
+      var hunks = Diff.diffLines(d.installed_content, rawContent);
+      var hasChanges = hunks.some(function(h) { return h.added || h.removed; });
+      if (!hasChanges) {
+        out.innerHTML = '<span class="diff-eq">  (no differences)</span>';
+      } else {
+        out.innerHTML = hunks.map(function(hunk) {
+          var lines = hunk.value.split('\n');
+          if (lines[lines.length - 1] === '') lines.pop();
+          var prefix = hunk.added ? '+ ' : hunk.removed ? '- ' : '  ';
+          var cls = hunk.added ? 'diff-add' : hunk.removed ? 'diff-del' : 'diff-eq';
+          return lines.map(function(line) {
+            return '<span class="' + cls + '">' + prefix + esc(line) + '</span>';
+          }).join('');
+        }).join('');
+      }
+    }
+    document.getElementById('view-section').classList.add('hidden');
+    document.getElementById('release-diff-section').classList.remove('hidden');
+  }
+
+  function hideReleaseDiff() {
+    document.getElementById('release-diff-section').classList.add('hidden');
+    document.getElementById('view-section').classList.remove('hidden');
+    document.getElementById('release-diff-btn').classList.remove('hidden');
+    document.getElementById('download-btn').classList.remove('hidden');
+    var subtitle = document.getElementById('dotenv-subtitle');
+    if (subtitle) { subtitle.classList.add('text-gray-400'); subtitle.classList.remove('bg-green-50', 'text-green-800', 'px-2', 'py-0.5', 'rounded', 'w-fit'); }
+    // Restore edit button only when no other user's lock is active
+    if (document.getElementById('force-unlock-btn').classList.contains('hidden')) {
+      document.getElementById('edit-btn').classList.remove('hidden');
+    }
+  }
+
+  // ── Diff ─────────────────────────────────────────────────────────────────
+
+  function showDiff() {
+    var newContent = document.getElementById('edit-textarea').value;
+    var hunks = Diff.diffLines(rawContent, newContent);
+    var hasChanges = hunks.some(function(h) { return h.added || h.removed; });
+    var html;
+    if (!hasChanges) {
+      html = '<span class="diff-eq">  (no changes)</span>';
+    } else {
+      html = hunks.map(function(hunk) {
+        var lines = hunk.value.split('\n');
+        if (lines[lines.length - 1] === '') lines.pop();
+        var prefix = hunk.added ? '+ ' : hunk.removed ? '- ' : '  ';
+        var cls    = hunk.added ? 'diff-add' : hunk.removed ? 'diff-del' : 'diff-eq';
+        return lines.map(function(line) {
+          return '<span class="' + cls + '">' + prefix + esc(line) + '</span>';
+        }).join('');
+      }).join('');
+    }
+    document.getElementById('diff-output').innerHTML = html;
+    document.getElementById('edit-section').classList.add('hidden');
+    document.getElementById('diff-section').classList.remove('hidden');
+    document.getElementById('save-error').classList.add('hidden');
+  }
+
+  function backToEdit() {
+    document.getElementById('diff-section').classList.add('hidden');
+    document.getElementById('edit-section').classList.remove('hidden');
+  }
+
+  {% if is_locked %}
+  // Start countdown for a lock that was already held on page load
+  (function () {
+    startCountdown({{ locked_since | tojson }}, {{ locked_since_ts }});
+  })();
+  {% endif %}
+
+  async function confirmSave() {
+    var newContent = document.getElementById('edit-textarea').value;
+    var errEl = document.getElementById('save-error');
+    errEl.classList.add('hidden');
+    var res  = await fetch(urlPrefix + '/' + envName + '/dotenv/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: lockToken, content: newContent }),
+    });
+    var data = await res.json();
+    if (data.ok) {
+      lockToken = null;
+      window.location.reload();
+    } else {
+      errEl.textContent = data.error || 'Save failed.';
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  window.addEventListener('beforeunload', function () {
+    if (lockToken) {
+      fetch(urlPrefix + '/' + envName + '/dotenv/unlock', {
+        method: 'POST',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: lockToken }),
+      });
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

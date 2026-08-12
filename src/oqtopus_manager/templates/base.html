@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}OQTOPUS Manager{% endblock %}</title>
+  {% if has_favicon %}<link rel="icon" href="/favicon.ico">{% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html { font-size: 18px; }
+    body { font-family: 'Inter', sans-serif; }
+    .hljs-comment { font-style: italic; }
+
+    /* Sidebar / main-area transitions */
+    #sidebar   { transition: width 0.25s ease; }
+    #main-area { transition: margin-left 0.25s ease; }
+    .sidebar-label, .nav-section-label { transition: opacity 0.15s ease; white-space: nowrap; }
+    .sidebar-collapsed #sidebar       { width: 3.5rem; }
+    .sidebar-collapsed #main-area     { margin-left: 3.5rem; }
+    .sidebar-collapsed .sidebar-label      { opacity: 0; width: 0; overflow: hidden; }
+    .sidebar-collapsed .nav-section-label  { opacity: 0; height: 0; overflow: hidden; padding: 0; margin: 0; }
+    .sidebar-collapsed #toggle-chevron     { transform: rotate(180deg); }
+    .sidebar-collapsed #user-me-link      { justify-content: center; padding-left: 0; padding-right: 0; gap: 0; }
+
+    /* Sidebar toggle button: always centered in the icon column (never moves) */
+    #sidebar-toggle-wrap {
+      position: fixed;
+      top: calc(3.5rem + 1rem);
+      left: 1.75rem;
+      transform: translateX(-50%);
+      z-index: 15;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 0.375rem; padding: 0.5rem 1rem; border-radius: 0.5rem;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer; user-select: none;
+      border: 1px solid transparent; transition: all 0.15s ease;
+      white-space: nowrap; line-height: 1.25rem; text-decoration: none;
+    }
+    .btn:disabled, .btn-disabled { opacity: 0.6; cursor: not-allowed; pointer-events: none; background: #f0f2f5 !important; }
+    .btn-primary { background-color: #4887FA; border-color: #4887FA; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background-color: #3672e8; border-color: #3672e8; }
+    .btn-primary.btn-outline { background: #fff; border-color: #4887FA; color: #4887FA; }
+    .btn-primary.btn-outline:hover:not(:disabled) { background-color: #eff4ff; }
+    .btn-ghost { background: transparent; border-color: transparent; color: #6b7280; }
+    .btn-ghost:hover:not(:disabled) { background-color: #f3f4f6; color: #111827; }
+    .btn-outline { background: #fff; border-color: #d1d5db; color: #6b7280; }
+    .btn-outline:hover:not(:disabled) { background-color: #f1f5f9; color: #374151; }
+    .btn-error { border-color: #fca5a5; color: #dc2626; background: #fff; }
+    .btn-error:hover:not(:disabled) { background-color: #fef2f2; }
+    .btn-success { border-color: #86efac; color: #16a34a; background: #fff; }
+    .btn-success:hover:not(:disabled) { background-color: #f0fdf4; }
+    .btn-warning { border-color: #fcd34d; color: #d97706; background: #fff; }
+    .btn-warning:hover:not(:disabled) { background-color: #fffbeb; }
+    .btn-sm  { padding: 0.375rem 0.75rem; font-size: 0.8125rem; }
+    .btn-xs  { padding: 0.25rem 0.5rem;   font-size: 0.75rem; }
+    .btn-square { padding: 0.5rem; }
+
+    /* Badges */
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 0.1875rem 0.5rem; border-radius: 0.375rem;
+      font-size: 0.75rem; font-weight: 500; border: 1px solid transparent;
+    }
+    .badge-ghost { background-color: #f3f4f6; color: #6b7280; border-color: #e5e7eb; }
+    .badge-sm { padding: 0.125rem 0.375rem; font-size: 0.6875rem; }
+
+    /* Form controls */
+    .form-control { display: flex; flex-direction: column; }
+    .label { display: flex; align-items: center; padding: 0.25rem 0; }
+    .label-text { font-size: 0.875rem; font-weight: 500; color: #374151; }
+    .label-text-alt { font-size: 0.75rem; color: #9ca3af; }
+
+    .input {
+      display: block; width: 100%; padding: 0.5rem 0.75rem;
+      border: 1px solid #d1d5db; border-radius: 0.5rem;
+      font-size: 0.875rem; color: #111827; background: #f0f2f5;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .input:focus { outline: none; border-color: #4887FA; box-shadow: 0 0 0 3px rgba(72,135,250,0.15); background: #fff; }
+    .input:disabled { background: #f9fafb; color: #9ca3af; cursor: not-allowed; }
+    .input-bordered { border-color: #d1d5db; }
+    .input-sm { padding: 0.375rem 0.625rem; font-size: 0.8125rem; }
+    .input-xs { padding: 0.1875rem 0.5rem;  font-size: 0.75rem; }
+    .input-primary:focus { border-color: #4887FA; box-shadow: 0 0 0 3px rgba(72,135,250,0.15); }
+
+    .select {
+      display: block; width: 100%; padding: 0.5rem 2rem 0.5rem 0.75rem;
+      border: 1px solid #d1d5db; border-radius: 0.5rem;
+      font-size: 0.875rem; color: #111827; background: #fff;
+      -webkit-appearance: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 0.5rem center; background-size: 1.25em;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .select:focus { outline: none; border-color: #4887FA; box-shadow: 0 0 0 3px rgba(72,135,250,0.15); }
+    .select-bordered { border-color: #d1d5db; }
+    .select-sm { padding: 0.3125rem 2rem 0.3125rem 0.625rem; font-size: 0.8125rem; }
+    .select-primary:focus { border-color: #4887FA; }
+
+    /* Table */
+    .table { width: 100%; border-collapse: collapse; }
+    .table th { padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 2px solid #e5e7eb; }
+    .table td { padding: 0.75rem 1rem; color: #374151; border-bottom: 1px solid #e5e7eb; }
+
+    /* Alert */
+    .alert { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 0.5rem; }
+    .alert-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+    /* Loading spinner */
+    @keyframes oq-spin { to { transform: rotate(360deg); } }
+    .loading { display: inline-flex; align-items: center; }
+    .loading-spinner { width: 1.25rem; height: 1.25rem; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: oq-spin 0.7s linear infinite; }
+    .loading-sm { width: 1rem;    height: 1rem; }
+    .loading-xs { width: 0.75rem; height: 0.75rem; }
+
+    /* Checkbox */
+    .checkbox {
+      -webkit-appearance: none; appearance: none;
+      width: 1rem; height: 1rem; border-radius: 0.25rem;
+      border: 1.5px solid #d1d5db; background: #fff; cursor: pointer;
+      flex-shrink: 0; transition: all 0.15s;
+    }
+    .checkbox:checked {
+      background-color: #4887FA; border-color: #4887FA;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' d='M3 8l4 4 6-7'/%3E%3C/svg%3E");
+      background-size: 100%; background-repeat: no-repeat; background-position: center;
+    }
+    .checkbox-xs { width: 0.875rem; height: 0.875rem; }
+
+    /* details/summary */
+    details > summary { list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
+  </style>
+  <script>
+    if (localStorage.getItem('sidebar-collapsed') === 'true') {
+      document.documentElement.classList.add('sidebar-collapsed');
+    }
+  </script>
+  {% block extra_head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-[#F0F8FF]">
+
+  <!-- Sidebar toggle button: fixed at sidebar right edge, always same position -->
+  <div id="sidebar-toggle-wrap">
+    <button id="sidebar-toggle"
+            class="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 bg-white hover:bg-gray-50 text-gray-400 hover:text-gray-600 transition-colors shadow-sm"
+            title="Toggle sidebar">
+      <svg id="toggle-chevron" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform duration-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M15 18l-6-6 6-6"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Sidebar (fixed, full height) -->
+  <aside id="sidebar" class="w-56 bg-white border-r border-gray-200 flex flex-col fixed top-0 left-0 bottom-0 z-10 overflow-hidden shadow-sm">
+    <!-- Brand -->
+    <div class="h-14 flex items-center px-3 border-b border-gray-100 flex-shrink-0">
+      <a href="/" class="flex items-center gap-2.5 min-w-0">
+        {% if has_app_icon %}
+        <img src="/app-icon" class="w-8 h-8 rounded-lg object-contain flex-shrink-0" alt="{{ app_name }}">
+        {% else %}
+        <div class="w-8 h-8 flex items-center justify-center flex-shrink-0">
+          <svg viewBox="0 0 32 32" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <ellipse cx="16" cy="16" rx="13.5" ry="5.5" stroke="#4887FA" stroke-width="1.5" fill="none" opacity="0.8"/>
+            <ellipse cx="16" cy="16" rx="13.5" ry="5.5" stroke="#38BDF7" stroke-width="1.5" fill="none" opacity="0.7" transform="rotate(60 16 16)"/>
+            <ellipse cx="16" cy="16" rx="13.5" ry="5.5" stroke="#4887FA" stroke-width="1.5" fill="none" opacity="0.6" transform="rotate(120 16 16)"/>
+            <circle cx="16" cy="16" r="2.5" fill="#4887FA"/>
+            <circle cx="29.5" cy="16" r="1.8" fill="#38BDF7"/>
+            <circle cx="9.25" cy="5.3"  r="1.8" fill="#4887FA" opacity="0.85"/>
+            <circle cx="9.25" cy="26.7" r="1.8" fill="#38BDF7" opacity="0.85"/>
+          </svg>
+        </div>
+        {% endif %}
+        <span class="sidebar-label font-bold text-gray-900 text-base truncate">{{ app_name }}</span>
+      </a>
+    </div>
+    <nav class="flex-1 px-2 pt-16 pb-2 space-y-0.5 overflow-y-auto">
+      <p class="nav-section-label px-2.5 pb-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Environments</p>
+
+      {% for tmpl in environment_templates %}
+      {% set tmpl_label = tmpl | replace('-', ' ') | title %}
+      {% set tmpl_url = '/' + tmpl %}
+      <a href="{{ tmpl_url }}" title="{{ tmpl_label }}"
+         class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors duration-150
+                {% if request.url.path == tmpl_url or request.url.path.startswith(tmpl_url + '/') %}
+                bg-[#EFF4FF] text-[#4887FA]
+                {% else %}
+                text-gray-600 hover:bg-gray-50 hover:text-gray-900
+                {% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="8" rx="2"/>
+          <rect x="2" y="14" width="20" height="8" rx="2"/>
+          <line x1="6" y1="6" x2="6.01" y2="6"/>
+          <line x1="6" y1="18" x2="6.01" y2="18"/>
+        </svg>
+        <span class="sidebar-label">{{ tmpl_label }}</span>
+      </a>
+      {% endfor %}
+
+      {% if sidebar_links %}
+      <p class="nav-section-label px-2.5 pb-1.5 pt-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">Links</p>
+      {% for link in sidebar_links %}
+      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" title="{{ link.label }}"
+         class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors duration-150 text-gray-600 hover:bg-gray-50 hover:text-gray-900">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          <polyline points="15 3 21 3 21 9"/>
+          <line x1="10" y1="14" x2="21" y2="3"/>
+        </svg>
+        <span class="sidebar-label">{{ link.label }}</span>
+      </a>
+      {% endfor %}
+      {% endif %}
+
+      <p class="nav-section-label px-2.5 pb-1.5 pt-3 text-xs font-semibold text-gray-400 uppercase tracking-wider">System</p>
+
+      <a href="/api-docs" title="API Docs"
+         class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors duration-150
+                {% if request.url.path == '/api-docs' %}
+                bg-[#EFF4FF] text-[#4887FA]
+                {% else %}
+                text-gray-600 hover:bg-gray-50 hover:text-gray-900
+                {% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+        <span class="sidebar-label">API Docs</span>
+      </a>
+
+      <a href="/settings" title="Settings"
+         class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors duration-150
+                {% if request.url.path == '/settings' %}
+                bg-[#EFF4FF] text-[#4887FA]
+                {% else %}
+                text-gray-600 hover:bg-gray-50 hover:text-gray-900
+                {% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span class="sidebar-label">Settings</span>
+      </a>
+
+      {% if request.state.user and request.app.state.config.auth.provider != "none" %}
+      {% set signout_url = request.app.state.config.auth.header.signout_url %}
+      {% if signout_url %}
+      <a href="{{ signout_url }}" title="Sign out"
+         class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors duration-150 text-gray-600 hover:bg-red-50 hover:text-red-600">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span class="sidebar-label">Sign out</span>
+      </a>
+      {% endif %}
+      {% endif %}
+    </nav>
+    {% if request.state.user and request.app.state.config.auth.provider != "none" %}
+    <div class="border-t border-gray-100 px-2 py-2 flex-shrink-0">
+      <a id="user-me-link" href="/me" title="My Account"
+         class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg transition-colors duration-150 min-w-0
+                {% if request.url.path == '/me' %}bg-[#EFF4FF]{% else %}hover:bg-gray-50{% endif %}">
+        <div class="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-semibold
+          {% if request.state.user.role == 'admin' %}bg-amber-100 text-amber-700
+          {% elif request.state.user.role == 'operator' %}bg-blue-100 text-blue-600
+          {% else %}bg-gray-100 text-gray-600{% endif %}">
+          {{ request.state.user.account[0] | upper }}
+        </div>
+        <div class="sidebar-label min-w-0">
+          <p class="text-xs font-medium text-gray-900 truncate leading-tight">{{ request.state.user.account }}</p>
+          <div class="flex flex-wrap gap-x-1 mt-0.5">
+            {% for r in request.state.user.roles %}
+            <span class="text-xs leading-tight
+              {% if r == 'admin' %}text-amber-600
+              {% elif r == 'operator' %}text-blue-500
+              {% else %}text-gray-400{% endif %}">{{ r }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      </a>
+    </div>
+    {% endif %}
+  </aside>
+
+  <!-- Main area (offset for sidebar) -->
+  <div id="main-area" class="ml-56 flex flex-col min-h-screen">
+    {% block page_banner %}{% endblock %}
+    <main class="flex-1 p-5">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      document.getElementById('sidebar-toggle').addEventListener('click', function () {
+        var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+        localStorage.setItem('sidebar-collapsed', collapsed);
+      });
+    })();
+
+    // Shared copy-to-clipboard helper for output/terminal panels across the app.
+    window.oqCopyToClipboard = function (text, btn) {
+      var iconCopy = btn.querySelector('.oq-icon-copy');
+      var iconCopied = btn.querySelector('.oq-icon-copied');
+      function showCopied() {
+        if (!iconCopy || !iconCopied) return;
+        iconCopy.classList.add('hidden');
+        iconCopied.classList.remove('hidden');
+        setTimeout(function () {
+          iconCopy.classList.remove('hidden');
+          iconCopied.classList.add('hidden');
+        }, 1200);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(showCopied);
+      } else {
+        // execCommand fallback: Clipboard API needs a secure context, unavailable on plain-HTTP LAN access
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showCopied();
+      }
+    };
+  </script>
+</body>
+</html>

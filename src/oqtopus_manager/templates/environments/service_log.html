@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}{{ service }} log | {{ env.name }} | OQTOPUS Manager{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Remove main's top/bottom padding so the terminal card sits flush with the banner */
+  main { padding-top: 0 !important; padding-bottom: 0 !important; }
+
+  #log-area.is-fullscreen {
+    position: fixed; inset: 0; z-index: 50; padding: 0;
+  }
+  #log-area.is-fullscreen > div {
+    height: 100% !important; border-radius: 0; overflow: hidden;
+  }
+</style>
+{% endblock %}
+
+{% block page_banner %}
+<div class="relative overflow-hidden px-8 py-3" style="background: url('/assets/mv_bg.png') center/cover no-repeat; background-color: #2563eb;">
+  {% include "_banner_svg.html" %}
+  <div class="relative">
+    <a href="{{ url_prefix }}/{{ env.name }}" class="inline-flex items-center gap-1 text-blue-200 hover:text-white text-sm mb-2 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
+      {{ env.name }}
+    </a>
+    <div class="flex items-center gap-3">
+      <h1 class="text-2xl font-bold text-white">{{ service }}</h1>
+      <span class="px-2.5 py-1 rounded-md bg-white/20 text-white text-sm font-semibold font-mono">log</span>
+    </div>
+    {% if log_file %}
+    <p class="text-blue-200 text-xs font-mono mt-1">{{ log_file }}</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if log_file is none %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-10 text-center">
+  <p class="text-sm text-gray-400">Log file not configured.</p>
+  <p class="text-xs text-gray-300 mt-1">Check <span class="font-mono">config/{{ service }}/logging.yaml</span> for <span class="font-mono">handlers.file.filename</span>.</p>
+</div>
+{% else %}
+
+<div id="log-area">
+<div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col" style="height: calc(100vh - 9rem);">
+  {# Toolbar #}
+  <div class="px-4 py-2 bg-gray-50 border-b border-gray-200 flex items-center gap-3 flex-wrap">
+    {# Left: Connect / Disconnect + status #}
+    <div class="flex items-center gap-2">
+      <button id="btn-connect" onclick="connectLog()" class="btn btn-sm btn-primary gap-1.5">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
+        </svg>
+        Connect
+      </button>
+      <button id="btn-disconnect" onclick="disconnectLog()" class="btn btn-sm btn-outline gap-1.5 hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6"/>
+        </svg>
+        Disconnect
+      </button>
+      <span id="status-dot" class="inline-flex items-center gap-1.5 text-xs text-gray-400">
+        <span class="w-2 h-2 rounded-full bg-gray-300"></span>
+        Disconnected
+      </span>
+    </div>
+
+    {# Highlight input #}
+    <div class="flex items-center gap-1.5 flex-1 min-w-0 ml-4">
+      <span class="text-xs text-gray-500 flex-shrink-0">Highlight</span>
+      <input id="highlight-input" type="text" placeholder="Highlight..."
+             class="input input-xs input-bordered font-mono w-40 bg-white"
+             oninput="updateHighlight()">
+      <button onclick="clearHighlight()" id="btn-clear-highlight" class="btn btn-ghost btn-xs text-gray-400 hover:text-gray-600 hidden" title="Clear highlight">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+      <label class="flex items-center gap-1 text-xs text-gray-500 cursor-pointer select-none">
+        <input id="chk-case" type="checkbox" class="checkbox checkbox-xs" onchange="updateHighlight()">
+        Aa
+      </label>
+    </div>
+
+    {# Right: controls #}
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+        <input id="chk-autoscroll" type="checkbox" class="checkbox checkbox-xs" checked>
+        Auto-scroll
+      </label>
+      <a href="{{ url_prefix }}/{{ env.name }}/services/{{ service }}/log/download" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download full log file">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download
+      </a>
+      <button onclick="oqCopyToClipboard(document.getElementById('terminal').textContent, this)" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Copy log">
+        <svg class="oq-icon-copy h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        <svg class="oq-icon-copied h-4 w-4 hidden text-green-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Copy
+      </button>
+      <button onclick="clearLog()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>
+        </svg>
+        Clear
+      </button>
+      <span id="line-count" class="text-xs text-gray-400 font-mono">0 / {{ buffer_lines }} lines</span>
+      <button onclick="toggleFullscreen()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600" title="Fullscreen">
+        <svg id="icon-expand" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+        <svg id="icon-collapse" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  {# Terminal #}
+  <div id="terminal"
+       class="font-mono text-xs leading-5 bg-gray-900 text-gray-100 overflow-y-auto px-4 py-3 flex-1"
+       style="min-height: 0; white-space: pre-wrap; word-break: break-all;">
+  </div>
+</div>
+</div>
+
+<script>
+  var envName     = {{ env.name | tojson }};
+  var serviceName = {{ service | tojson }};
+  var urlPrefix   = {{ url_prefix | tojson }};
+  var MAX_LINES = {{ buffer_lines }};
+  var lineCount = 0;
+  var es = null;
+
+  var terminal       = document.getElementById('terminal');
+  var btnConnect     = document.getElementById('btn-connect');
+  var btnDisconn     = document.getElementById('btn-disconnect');
+  var statusDot      = document.getElementById('status-dot');
+  var lineCounter    = document.getElementById('line-count');
+  var chkScroll      = document.getElementById('chk-autoscroll');
+  var highlightInput = document.getElementById('highlight-input');
+  var btnClearHL     = document.getElementById('btn-clear-highlight');
+  var chkCase        = document.getElementById('chk-case');
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function renderLine(raw, query) {
+    var html = escapeHtml(raw);
+    if (!query) return html;
+    var pattern = escapeRegex(escapeHtml(query));
+    var flags = chkCase.checked ? 'g' : 'gi';
+    return html.replace(
+      new RegExp(pattern, flags),
+      '<mark style="background:#fef08a;color:#111827;border-radius:2px;padding:0 1px">$&</mark>'
+    );
+  }
+
+  function appendLine(text) {
+    var div = document.createElement('div');
+    div.dataset.raw = text;
+    div.innerHTML = renderLine(text, highlightInput.value);
+    terminal.appendChild(div);
+    lineCount++;
+    if (lineCount > MAX_LINES) {
+      var oldest = terminal.firstChild;
+      if (oldest) terminal.removeChild(oldest);
+      lineCount--;
+    }
+    lineCounter.textContent = lineCount + ' / ' + MAX_LINES + ' lines';
+    if (chkScroll.checked) {
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+  }
+
+  function updateHighlight() {
+    var query = highlightInput.value;
+    btnClearHL.classList.toggle('hidden', !query);
+    terminal.querySelectorAll('div[data-raw]').forEach(function (div) {
+      div.innerHTML = renderLine(div.dataset.raw, query);
+    });
+  }
+
+  function clearHighlight() {
+    highlightInput.value = '';
+    updateHighlight();
+    highlightInput.focus();
+  }
+
+  function setStatus(connected) {
+    if (connected) {
+      statusDot.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-400"></span>Connected';
+      btnConnect.classList.add('hidden');
+      btnDisconn.classList.remove('hidden');
+    } else {
+      statusDot.innerHTML = '<span class="w-2 h-2 rounded-full bg-gray-300"></span>Disconnected';
+      btnConnect.classList.remove('hidden');
+      btnDisconn.classList.add('hidden');
+    }
+  }
+
+  function connectLog() {
+    if (es) es.close();
+    es = new EventSource(urlPrefix + '/' + envName + '/services/' + serviceName + '/log/stream');
+    setStatus(true);
+
+    es.onmessage = function (e) {
+      appendLine(e.data);
+    };
+
+    es.onerror = function () {
+      setStatus(false);
+      es.close();
+      es = null;
+    };
+  }
+
+  function disconnectLog() {
+    if (es) { es.close(); es = null; }
+    setStatus(false);
+  }
+
+  function clearLog() {
+    terminal.innerHTML = '';
+    lineCount = 0;
+    lineCounter.textContent = '0 / ' + MAX_LINES + ' lines';
+  }
+
+  function toggleFullscreen() {
+    var la = document.getElementById('log-area');
+    var isFs = la.classList.toggle('is-fullscreen');
+    document.getElementById('icon-expand').classList.toggle('hidden', isFs);
+    document.getElementById('icon-collapse').classList.toggle('hidden', !isFs);
+  }
+
+  connectLog();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}My Account | {{ app_name }}{% endblock %}
+
+{% block page_banner %}
+<div class="relative overflow-hidden px-8 py-8" style="background: url('/assets/mv_bg.png') center/cover no-repeat; background-color: #2563eb;">
+  {% include "_banner_svg.html" %}
+  <div class="relative">
+    <h1 class="text-2xl font-bold text-white">My Account</h1>
+    <p class="text-blue-100 text-sm mt-1">Authenticated user information</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+{% set user = request.state.user %}
+{% if user %}
+<div class="space-y-5">
+
+  <details data-sec="me-identity" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group" open>
+    <summary class="flex items-center gap-2 px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-[#4887FA]">User Information</h2>
+    </summary>
+    <dl class="divide-y divide-gray-200">
+      <div class="flex items-center px-5 py-2">
+        <dt class="w-24 text-sm font-medium text-gray-500 flex-shrink-0">Account</dt>
+        <dd class="text-sm font-mono text-gray-800 break-all">{{ user.account }}</dd>
+      </div>
+      <div class="flex items-start px-5 py-2">
+        <dt class="w-24 text-sm font-medium text-gray-500 flex-shrink-0 pt-0.5">Roles</dt>
+        <dd class="flex flex-wrap gap-x-1">
+          {% for r in user.roles %}
+          <span class="text-sm
+            {% if r == 'admin' %}text-amber-600
+            {% elif r == 'operator' %}text-blue-500
+            {% else %}text-gray-400{% endif %}">{{ r }}</span>
+          {% endfor %}
+        </dd>
+      </div>
+    </dl>
+  </details>
+
+</div>
+
+<script>
+  document.querySelectorAll('details[data-sec]').forEach(function (el) {
+    var id = el.dataset.sec;
+    var saved = localStorage.getItem('sec:' + id);
+    if (saved === '0') el.removeAttribute('open');
+    el.addEventListener('toggle', function () {
+      localStorage.setItem('sec:' + id, el.open ? '1' : '0');
+    });
+  });
+</script>
+{% else %}
+<div class="max-w-lg">
+  <div class="bg-white border border-gray-200 rounded-lg px-5 py-8 text-center">
+    <p class="text-sm text-gray-500">Authentication is disabled (<code class="font-mono text-gray-700">provider: none</code>).</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

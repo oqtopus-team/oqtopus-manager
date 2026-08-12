@@ -1,0 +1,98 @@
+{% macro editor_section(p, title, subtitle, sec_key, code_id, lang_class, content, dl_onclick) %}
+<details id="details-{{ p }}" data-sec="{{ sec_key }}" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group" open>
+  <summary class="flex items-center gap-2 px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors border-b border-transparent group-open:border-gray-200">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M9 18l6-6-6-6"/>
+    </svg>
+    <div class="flex-1 min-w-0">
+      <h2 class="text-sm font-semibold text-[#4887FA]">{{ title }}</h2>
+      <p id="{{ p }}-subtitle" class="text-xs text-gray-400 font-mono mt-0.5 truncate">{{ subtitle }}</p>
+    </div>
+    <div class="flex items-center gap-2 flex-shrink-0" onclick="event.stopPropagation()">
+      <span id="{{ p }}-lock-badge" class="hidden inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span id="{{ p }}-lock-badge-text"></span>
+      </span>
+      <button id="{{ p }}-force-unlock-btn" onclick="{{ p }}Editor.openForceUnlockModal()" class="hidden btn btn-ghost btn-sm gap-1" style="color:#dc2626;" title="Force unlock">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+        </svg>
+        Force Unlock
+      </button>
+      <button id="{{ p }}-release-diff-btn" onclick="{{ p }}Editor.showReleaseDiff()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="18" cy="18" r="3"/>
+          <circle cx="6" cy="6" r="3"/>
+          <path d="M6 21V9a9 9 0 0 0 9 9"/>
+        </svg>
+        Diff with release
+      </button>
+      <button id="{{ p }}-edit-btn" onclick="{{ p }}Editor.startEdit()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        Edit
+      </button>
+      <button id="{{ p }}-preview-btn" onclick="{{ p }}Editor.showDiff()" class="hidden btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+        Preview &amp; Save
+      </button>
+      <button id="{{ p }}-cancel-btn" onclick="{{ p }}Editor.cancelEdit()" class="hidden btn btn-ghost btn-sm text-gray-500">Cancel</button>
+      <button id="{{ p }}-download-btn" onclick="{{ dl_onclick }}" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download
+      </button>
+      <button onclick="{{ p }}Editor.toggleFullscreen()" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600" title="Fullscreen">
+        <svg id="{{ p }}-fs-expand" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+        <svg id="{{ p }}-fs-collapse" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+        </svg>
+      </button>
+    </div>
+  </summary>
+  <div id="{{ p }}-view">
+    <pre class="m-0 rounded-none border-0 bg-white"><code id="{{ code_id }}" class="{{ lang_class }} text-sm leading-relaxed">{{ content | e }}</code></pre>
+  </div>
+  <div id="{{ p }}-edit" class="hidden border-t border-gray-200 px-4 py-3">
+    <div class="cfg-edit-wrap">
+      <pre id="{{ p }}-edit-pre" class="cfg-edit-pre hljs {{ lang_class }}"></pre>
+      <textarea id="{{ p }}-edit-ta" class="cfg-edit-ta" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    </div>
+  </div>
+  <div id="{{ p }}-diff" class="hidden border-t border-gray-200">
+    <div class="flex items-center justify-between px-5 pt-4 pb-2">
+      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Changes</p>
+      <div class="flex items-center gap-2">
+        <button onclick="{{ p }}Editor.confirmSave()" class="btn btn-sm btn-success btn-outline">Confirm Save</button>
+        <button onclick="{{ p }}Editor.backToEdit()" class="btn btn-sm btn-outline">Back to Edit</button>
+        <button onclick="{{ p }}Editor.cancelEditFromDiff()" class="btn btn-sm btn-outline btn-error">Cancel</button>
+      </div>
+    </div>
+    <div id="{{ p }}-diff-out" class="cfg-diff-out"></div>
+  </div>
+  <div id="{{ p }}-release-diff" class="hidden border-t border-gray-200">
+    <div class="flex items-start justify-between px-5 pt-4 pb-2">
+      <div class="min-w-0 flex-1 space-y-1">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Diff with release</p>
+        <p id="{{ p }}-release-diff-path" class="text-xs font-mono bg-red-50 text-red-800 px-2 py-0.5 rounded w-fit ml-6"></p>
+      </div>
+      <button onclick="{{ p }}Editor.hideReleaseDiff()" class="btn btn-sm btn-outline ml-4 flex-shrink-0">Close</button>
+    </div>
+    <div id="{{ p }}-release-diff-out" class="cfg-diff-out"></div>
+  </div>
+</details>
+{% endmacro %}
