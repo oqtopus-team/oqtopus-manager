@@ -4,6 +4,7 @@
 # OQTOPUS Manager
 
 [![CI](https://github.com/oqtopus-team/oqtopus-manager/actions/workflows/ci.yaml/badge.svg)](https://github.com/oqtopus-team/oqtopus-manager/actions/workflows/ci.yaml)
+[![codecov](https://codecov.io/gh/oqtopus-team/oqtopus-manager/graph/badge.svg?token=FNO9L3A5U2)](https://codecov.io/gh/oqtopus-team/oqtopus-manager)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![slack](https://img.shields.io/badge/slack-OQTOPUS-pink.svg?logo=slack&style=plastic)](https://join.slack.com/t/oqtopus/shared_invite/zt-3bpjb7yc3-Vg8IYSMY1m5wV3DR~TMSnw)
 
