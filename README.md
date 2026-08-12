@@ -16,7 +16,7 @@ It allows operators to manage multiple OQTOPUS environments running on a single 
 ## Quick Start
 
 ```bash
-git clone https://github.com/snuffkin/oqtopus-manager.git
+git clone https://github.com/oqtopus-team/oqtopus-manager.git
 cd oqtopus-manager
 make install
 make run
