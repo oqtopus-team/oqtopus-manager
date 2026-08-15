@@ -775,6 +775,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "oqtopus-auth", extra = ["fastapi"] },
     { name = "oqtopus-util" },
@@ -802,7 +803,6 @@ docs = [
     { name = "pymdown-extensions" },
 ]
 test = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-mock" },
@@ -811,6 +811,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.136.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "oqtopus-auth", extras = ["fastapi"], specifier = ">=0.1.0" },
     { name = "oqtopus-util", specifier = ">=1.0.0" },
@@ -838,7 +839,6 @@ docs = [
     { name = "pymdown-extensions", specifier = ">=10.21.3" },
 ]
 test = [
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "pytest-mock", specifier = ">=3.15.1" },
