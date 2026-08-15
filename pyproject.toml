@@ -27,7 +27,7 @@ dependencies = [
   "python-json-logger>=4.1.0",
   "python-multipart>=0.0.29",
   "pyyaml>=6.0.3",
-  "uvicorn[standard]>=0.47.0",
+  "uvicorn[standard]>=0.52.1",
 ]
 
 [project.urls]
@@ -36,12 +36,12 @@ repository = "https://github.com/oqtopus-team/oqtopus-manager"
 
 [dependency-groups]
 dev = [
-  "mypy>=2.1.0",
-  "ruff>=0.15.13",
-  "types-pyyaml>=6.0.12.20260518",
+  "mypy>=2.3.0",
+  "ruff>=0.16.2",
+  "types-pyyaml>=6.0.12.20260724",
 ]
 test = [
-  "pytest>=9.0.3",
+  "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-mock>=3.15.1",
 ]
@@ -51,10 +51,10 @@ docs = [
   "mkdocs-glightbox>=0.5.2",
   "mkdocs-literate-nav>=0.6.3",
   "mkdocs-macros-plugin>=1.5.0",
-  "mkdocs-material>=9.7.6",
-  "mkdocstrings[python]>=1.0.4",
-  "pymarkdownlnt>=0.9.37",
-  "pymdown-extensions>=10.21.3",
+  "mkdocs-material>=9.7.7",
+  "mkdocstrings[python]>=1.0.6",
+  "pymarkdownlnt>=0.9.39",
+  "pymdown-extensions>=11.0.1",
 ]
 
 [build-system]
