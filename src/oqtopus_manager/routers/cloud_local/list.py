@@ -13,7 +13,11 @@ from oqtopus_auth.fastapi import require_permission
 from pydantic import ValidationError
 
 from oqtopus_manager.models.environment import Environment
-from oqtopus_manager.routers._utils import _get_config, _get_templates, _has_running_services
+from oqtopus_manager.routers._utils import (
+    _get_config,
+    _get_templates,
+    _has_running_services,
+)
 from oqtopus_manager.routers.cloud_local._utils import _build_list_context
 from oqtopus_manager.util.cli import stream_oqtopus_init
 
