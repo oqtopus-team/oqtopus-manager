@@ -111,7 +111,8 @@
     .table td { padding: 0.75rem 1rem; color: #374151; border-bottom: 1px solid #e5e7eb; }
 
     /* Alert */
-    .alert { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 0.5rem; }
+    @keyframes oq-alert-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+    .alert { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 0.5rem; animation: oq-alert-in 0.3s ease-out; }
     .alert-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
 
     /* Loading spinner */

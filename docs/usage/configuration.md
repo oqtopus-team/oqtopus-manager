@@ -13,6 +13,15 @@ cp config/config.yaml.example config/config.yaml
 
 The following sections describe the configuration options for each section.
 
+`config.yaml` and `logging.yaml` can also be viewed (and, for admins, edited) from the **Settings** page in the
+application itself, at `/settings`:
+
+![Settings page showing config.yaml and logging.yaml](../asset/screenshots/app_settings_admin.png)
+
+!!! note
+    Saving `config.yaml` from the Settings page only writes the file to disk. Run `oqtopus manager restart`
+    (or restart the application) for the changes to take effect.
+
 ---
 
 ## server
@@ -33,6 +42,12 @@ server:
 | `port` | integer | **Yes** | — | TCP port the HTTP server listens on. |
 | `default_environment_base_path` | path | **Yes** | — | Directory where environment folders are stored when `root_path` is not specified per-environment. Relative paths are resolved from the working directory. |
 | `environments_file` | path | **Yes** | — | YAML file that stores the list of registered environments. Created automatically on first use. |
+
+!!! warning "`host: 0.0.0.0` exposes the application"
+    By default, `auth.provider` is `none`, meaning anyone who can reach the server can create, delete, and
+    configure environments with no login. `host: localhost` keeps this safe by only accepting connections
+    from the same machine. Before setting `host: 0.0.0.0` (or otherwise exposing OQTOPUS Manager to a network),
+    configure [Authentication](authentication.md) and [Permissions](permissions.md) first.
 
 ---
 

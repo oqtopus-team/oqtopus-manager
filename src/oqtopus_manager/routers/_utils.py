@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
 
+from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
+
 if TYPE_CHECKING:
     import pathlib
 
@@ -37,6 +39,21 @@ def _get_environment_or_404(name: str, cfg: AppConfig) -> Environment:
     if env is None:
         raise HTTPException(status_code=404, detail=f"Environment '{name}' not found.")
     return env
+
+
+async def _has_running_services(subcommand: str, root_dir: pathlib.Path) -> bool:
+    """Return True if ``oqtopus <subcommand> status`` reports any running service.
+
+    Returns:
+        True if at least one service line reports a running state.
+
+    """
+    output = await run_oqtopus_subcommand_output(subcommand, ["status"], root_dir)
+    for line in output.splitlines():
+        _, sep, value = line.partition(":")
+        if sep and value.strip().lower().startswith("running"):
+            return True
+    return False
 
 
 def _read_metadata(env_root: pathlib.Path, strip_prefix: str = "") -> dict[str, str]:
