@@ -7,6 +7,8 @@ nav:
   - Home: index.md
   - Usage:
       - Getting started: usage/getting_started.md
+      - Cloud Local Environments: usage/cloud_local.md
+      - Backend Environments: usage/backend.md
       - Configuration: usage/configuration.md
       - Authentication: usage/authentication.md
       - Permissions: usage/permissions.md
@@ -56,6 +58,7 @@ markdown_extensions:
 
 plugins:
   - search
+  - glightbox
   - gen-files:
       scripts:
         - docs_scripts/gen_ref_nav.py

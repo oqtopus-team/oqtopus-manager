@@ -12,6 +12,14 @@
 {% endblock %}
 
 {% block content %}
+<div id="form-error" class="hidden alert alert-error text-sm shadow-sm mb-4">
+  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M12 8v4M12 16h.01"/>
+  </svg>
+  <span id="form-error-text"></span>
+</div>
+
 <div class="flex items-center justify-end gap-2 mb-6">
   {% if env_items %}
   <button onclick="refreshAllStatus(this)"
@@ -199,12 +207,30 @@
 </div>
 <script>
   var _listUrlPrefix = {{ url_prefix | tojson }};
+
+  function showFormError(msg) {
+    var formError = document.getElementById('form-error');
+    document.getElementById('form-error-text').textContent = msg;
+    formError.classList.remove('hidden');
+    formError.style.animation = 'none';
+    void formError.offsetWidth;
+    formError.style.animation = '';
+    formError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
   function openDeleteModal(envName) {
     document.getElementById('delete-modal-name').textContent = envName;
     document.getElementById('delete-modal-confirm').onclick = function () {
       fetch(_listUrlPrefix + '/' + encodeURIComponent(envName), { method: 'DELETE' })
-        .then(function (r) { return r.text(); })
-        .then(function (html) { document.open(); document.write(html); document.close(); });
+        .then(function (r) {
+          if (r.ok) {
+            return r.text().then(function (html) { document.open(); document.write(html); document.close(); });
+          }
+          return r.json().catch(function () { return {}; }).then(function (body) {
+            showFormError(body.detail || 'Failed to delete environment.');
+            document.getElementById('delete-modal').classList.add('hidden');
+          });
+        });
     };
     document.getElementById('delete-modal').classList.remove('hidden');
   }

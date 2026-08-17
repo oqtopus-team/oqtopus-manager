@@ -13,7 +13,11 @@ from oqtopus_auth.fastapi import require_permission
 from pydantic import ValidationError
 
 from oqtopus_manager.models.environment import Environment
-from oqtopus_manager.routers._utils import _get_config, _get_templates
+from oqtopus_manager.routers._utils import (
+    _get_config,
+    _get_templates,
+    _has_running_services,
+)
 from oqtopus_manager.routers.backend._utils import _build_list_context
 from oqtopus_manager.util.cli import stream_oqtopus_init
 
@@ -185,6 +189,15 @@ async def delete_environment(request: Request, name: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail=f"Environment '{name}' not found.")
 
     root_dir = target.resolved_root_path(cfg.default_environment_base_path)
+    if root_dir.exists() and await _has_running_services("backend", root_dir):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete '{name}': one or more services are still running. "
+                "Stop all services first."
+            ),
+        )
+
     logger.info("Deleting environment '%s' (root=%s)", name, root_dir)
     if root_dir.exists():
         shutil.rmtree(root_dir)

@@ -43,6 +43,14 @@
 
 {% block content %}
 
+<div id="form-error" class="hidden alert alert-error text-sm shadow-sm mb-5">
+  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <circle cx="12" cy="12" r="10"/>
+    <path d="M12 8v4M12 16h.01"/>
+  </svg>
+  <span id="form-error-text"></span>
+</div>
+
 {# Settings panel #}
 <details data-sec="sec-settings" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-5 group" open>
   <summary class="flex items-center gap-2 px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors border-b border-transparent group-open:border-gray-200">
@@ -235,10 +243,31 @@
 </div>
 
 <script>
+function showFormError(msg) {
+  var formError = document.getElementById('form-error');
+  document.getElementById('form-error-text').textContent = msg;
+  formError.classList.remove('hidden');
+  formError.style.animation = 'none';
+  void formError.offsetWidth;
+  formError.style.animation = '';
+  formError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function confirmDelete(btn, url) {
+  var originalHtml = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="loading loading-spinner loading-sm"></span> Deleting…';
-  htmx.ajax('DELETE', url, { target: 'body', swap: 'innerHTML' });
+  fetch(url, { method: 'DELETE' }).then(function (r) {
+    if (r.ok) {
+      return r.text().then(function (html) { document.open(); document.write(html); document.close(); });
+    }
+    return r.json().catch(function () { return {}; }).then(function (body) {
+      showFormError(body.detail || 'Failed to delete environment.');
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+      document.getElementById('delete-modal').classList.add('hidden');
+    });
+  });
 }
 
 var envName = {{ env.name | tojson }};

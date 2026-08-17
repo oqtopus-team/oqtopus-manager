@@ -165,6 +165,27 @@ def test_delete_nonexistent_environment_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_delete_environment_blocked_while_running(
+    client: TestClient,
+    mock_stream_success: None,
+    tmp_path: pathlib.Path,
+    mocker: MockerFixture,
+) -> None:
+    client.get("/backend/stream?name=myenv&template=backend")
+    env_dir = tmp_path / "environments" / "myenv"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    mocker.patch(
+        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        return_value="core: Running (PID 123)\ngateway: Stopped\n",
+    )
+
+    response = client.request("DELETE", "/backend/myenv")
+
+    assert response.status_code == 409
+    assert "myenv" in response.json()["detail"]
+    assert env_dir.exists()
+
+
 def test_new_environment_form(client: TestClient) -> None:
     response = client.get("/backend/new")
     assert response.status_code == 200
@@ -326,6 +347,27 @@ def test_cloud_local_delete_nonexistent_returns_404(
         cloud_local_client.request("DELETE", "/cloud-local/nonexistent").status_code
         == 404
     )
+
+
+def test_cloud_local_delete_blocked_while_running(
+    cloud_local_client: TestClient,
+    mock_cl_stream_success: None,
+    tmp_path: pathlib.Path,
+    mocker: MockerFixture,
+) -> None:
+    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    env_dir = tmp_path / "environments" / "cl-demo"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    mocker.patch(
+        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        return_value="db: Running (cl-demo-db-1)\nworker: Stopped\n",
+    )
+
+    resp = cloud_local_client.request("DELETE", "/cloud-local/cl-demo")
+
+    assert resp.status_code == 409
+    assert "cl-demo" in resp.json()["detail"]
+    assert env_dir.exists()
 
 
 # ── backend detail (settings-partial, component-versions) ────────────────────

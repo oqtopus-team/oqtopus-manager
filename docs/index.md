@@ -13,9 +13,13 @@
 **OQTOPUS Manager** is a local/on-prem management application for OQTOPUS backend environments.
 It allows operators to manage multiple OQTOPUS backend environments running on a single host.
 
+![OQTOPUS Manager backend environment detail page, components installed and services running](./asset/screenshots/backend_detail_running.png)
+
 ## Usage
 
 - [Getting Started](./usage/getting_started.md)
+- [Cloud Local Environments](./usage/cloud_local.md)
+- [Backend Environments](./usage/backend.md)
 - [Configuration](./usage/configuration.md)
 - [Authentication](./usage/authentication.md)
 - [Permissions](./usage/permissions.md)
