@@ -68,7 +68,7 @@ def mock_stream_success(mocker: MockerFixture) -> None:
         yield "data: Initializing...\n\n"
         yield "event: done\ndata: success\n\n"
 
-    mocker.patch("oqtopus_manager.routers.backend.list.stream_oqtopus_init", side_effect=_gen)
+    mocker.patch("oqtopus_manager.services.environment.stream_oqtopus_init", side_effect=_gen)
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def mock_stream_failure(mocker: MockerFixture) -> None:
         yield "data: Error: template not found\n\n"
         yield "event: done\ndata: error\n\n"
 
-    mocker.patch("oqtopus_manager.routers.backend.list.stream_oqtopus_init", side_effect=_gen)
+    mocker.patch("oqtopus_manager.services.environment.stream_oqtopus_init", side_effect=_gen)
 
 
 def test_root_redirects_to_backend(client: TestClient) -> None:
@@ -150,7 +150,7 @@ def test_delete_environment(
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
-        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(returncode=0, stdout="", stderr=""),
     )
     response = client.request("DELETE", "/backend/myenv")
@@ -183,7 +183,7 @@ def test_delete_environment_blocked_while_running(
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
-        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=0,
             stdout="core: Running (PID 123)\ngateway: Stopped\n",
@@ -267,7 +267,7 @@ def mock_cl_stream_success(mocker: MockerFixture) -> None:
         yield "event: done\ndata: success\n\n"
 
     mocker.patch(
-        "oqtopus_manager.routers.cloud_local.list.stream_oqtopus_init",
+        "oqtopus_manager.services.environment.stream_oqtopus_init",
         side_effect=_gen,
     )
 
@@ -349,7 +349,7 @@ def test_cloud_local_delete_environment(
     env_dir = tmp_path / "environments" / "cl-demo"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
-        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(returncode=0, stdout="", stderr=""),
     )
     resp = cloud_local_client.request("DELETE", "/cloud-local/cl-demo")
@@ -376,7 +376,7 @@ def test_cloud_local_delete_blocked_while_running(
     env_dir = tmp_path / "environments" / "cl-demo"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
-        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=0,
             stdout="db: Running (cl-demo-db-1)\nworker: Stopped\n",
@@ -736,7 +736,7 @@ def test_backend_component_versions_returns_parsed_list(
 ) -> None:
     client.get("/backend/stream?name=demo&template=backend")
     mocker.patch(
-        "oqtopus_manager.routers.backend.detail.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=0,
             stdout="Available versions:\n  v1.0.0\n  v1.1.0\n",
@@ -757,7 +757,7 @@ def test_backend_component_versions_command_failure_returns_502(
     """A failed CLI invocation must surface as an error, not an empty list."""
     client.get("/backend/stream?name=demo&template=backend")
     mocker.patch(
-        "oqtopus_manager.routers.backend.detail.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=1, stdout="", stderr="engine: remote status check failed"
         ),
@@ -774,7 +774,7 @@ def test_cloud_local_component_versions_returns_parsed_list(
 ) -> None:
     cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
     mocker.patch(
-        "oqtopus_manager.routers.cloud_local.detail.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.cloud_local.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=0, stdout="Available versions:\n  v2.0.0\n", stderr=""
         ),
@@ -793,7 +793,7 @@ def test_cloud_local_component_versions_command_failure_returns_502(
 ) -> None:
     cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
     mocker.patch(
-        "oqtopus_manager.routers.cloud_local.detail.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.cloud_local.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=1, stdout="", stderr="cloud-local: remote status check failed"
         ),
@@ -816,7 +816,7 @@ def test_delete_environment_not_blocked_when_status_check_succeeds_and_stopped(
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
-        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=0, stdout="core: Stopped\ngateway: Stopped\n", stderr=""
         ),
@@ -841,7 +841,7 @@ def test_delete_environment_blocked_when_status_check_fails(
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
-        "oqtopus_manager.routers._utils.run_oqtopus_subcommand_output",
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=1, stdout="", stderr="connection to remote fleet failed"
         ),

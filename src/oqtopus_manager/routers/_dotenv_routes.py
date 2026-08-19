@@ -4,48 +4,33 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from oqtopus_auth.fastapi import require_permission
 
-from oqtopus_manager.routers._file_edit import (
-    _acquire_file_lock,
-    _check_lock,
-    _force_unlock_file,
-    _release_file_lock,
-    _save_file,
+from oqtopus_manager.routers._file_edit import (  # noqa: TC001 (pydantic body models FastAPI needs at runtime)
     _SaveBody,
     _UnlockBody,
 )
 from oqtopus_manager.routers._utils import (
     _get_config,
-    _get_environment_or_404,
     _get_templates,
+    _lock_error_response,
+)
+from oqtopus_manager.services import environment as env_service
+from oqtopus_manager.services.exceptions import (
+    LockConflictError,
+    LockExpiredError,
+    LockNotHeldError,
+    LockTokenMismatchError,
+    ServiceError,
 )
 
 if TYPE_CHECKING:
-    import pathlib
     from collections.abc import Sequence
 
 
-async def _fetch_dotenv_template(raw_url: str) -> str | None:
-    """Fetch the upstream .env template from GitHub.
-
-    Returns:
-        Template content, or None on network/HTTP failure.
-
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(raw_url)
-            resp.raise_for_status()
-            return resp.text
-    except httpx.HTTPError, httpx.TimeoutException:
-        return None
-
-
-def make_dotenv_router(
+def make_dotenv_router(  # noqa: C901, PLR0915
     url_prefix: str,
     tags: Sequence[str],
     *,
@@ -73,9 +58,13 @@ def make_dotenv_router(
     )
     async def force_unlock_dotenv(request: Request, name: str) -> JSONResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        return _force_unlock_file(resolved / "config" / ".env.lock")
+        env_service.force_unlock_file(resolved / "config" / ".env.lock")
+        return JSONResponse({"ok": True})
 
     @router.post(
         "/{name}/dotenv/lock",
@@ -83,11 +72,21 @@ def make_dotenv_router(
     )
     async def acquire_dotenv_lock(request: Request, name: str) -> JSONResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        return _acquire_file_lock(
-            resolved / "config" / ".env.lock", cfg.file_edit_lock_timeout_sec
-        )
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+            resolved = env.resolved_root_path(cfg.default_environment_base_path)
+            lock = env_service.acquire_file_lock(
+                resolved / "config" / ".env.lock", cfg.file_edit_lock_timeout_sec
+            )
+        except LockConflictError as exc:
+            return _lock_error_response(exc)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return JSONResponse({
+            "ok": True,
+            "token": lock.token,
+            "acquired_ts": lock.acquired_ts,
+        })
 
     @router.post(
         "/{name}/dotenv/unlock",
@@ -97,13 +96,19 @@ def make_dotenv_router(
         request: Request, name: str, body: _UnlockBody
     ) -> JSONResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        return _release_file_lock(
-            resolved / "config" / ".env.lock",
-            body.token,
-            cfg.file_edit_lock_timeout_sec,
-        )
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+            resolved = env.resolved_root_path(cfg.default_environment_base_path)
+            env_service.release_file_lock(
+                resolved / "config" / ".env.lock",
+                body.token,
+                cfg.file_edit_lock_timeout_sec,
+            )
+        except LockNotHeldError as exc:
+            return _lock_error_response(exc)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return JSONResponse({"ok": True})
 
     @router.post(
         "/{name}/dotenv/save",
@@ -111,17 +116,23 @@ def make_dotenv_router(
     )
     async def save_dotenv(request: Request, name: str, body: _SaveBody) -> JSONResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        dotenv_path = resolved / "config" / ".env"
-        lock_path = resolved / "config" / ".env.lock"
-        return _save_file(
-            dotenv_path,
-            lock_path,
-            body.content,
-            body.token,
-            cfg.file_edit_lock_timeout_sec,
-        )
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+            resolved = env.resolved_root_path(cfg.default_environment_base_path)
+            dotenv_path = resolved / "config" / ".env"
+            lock_path = resolved / "config" / ".env.lock"
+            env_service.save_file(
+                dotenv_path,
+                lock_path,
+                body.content,
+                body.token,
+                cfg.file_edit_lock_timeout_sec,
+            )
+        except (LockExpiredError, LockTokenMismatchError) as exc:
+            return _lock_error_response(exc)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return JSONResponse({"ok": True})
 
     @router.get(
         "/{name}/dotenv/download",
@@ -129,7 +140,10 @@ def make_dotenv_router(
     )
     async def environment_dotenv_download(request: Request, name: str) -> FileResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         dotenv_path = (
             env.resolved_root_path(cfg.default_environment_base_path)
             / "config"
@@ -144,7 +158,7 @@ def make_dotenv_router(
         dependencies=[require_permission("environment.config.get")],
     )
     async def dotenv_release_diff(name: str) -> JSONResponse:  # noqa: ARG001
-        content = await _fetch_dotenv_template(release_diff_raw_url)
+        content = await env_service.fetch_dotenv_template(release_diff_raw_url)
         return JSONResponse({
             "installed_content": content,
             "installed_path": release_diff_display_url,
@@ -157,17 +171,14 @@ def make_dotenv_router(
     )
     async def environment_dotenv(request: Request, name: str) -> HTMLResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         resolved = env.resolved_root_path(cfg.default_environment_base_path)
         dotenv_path = resolved / "config" / ".env"
         lock_path = resolved / "config" / ".env.lock"
-
-        def _read(path: pathlib.Path) -> str | None:
-            return path.read_text(encoding="utf-8") if path.exists() else None
-
-        is_locked, _, locked_since, locked_since_ts = _check_lock(
-            lock_path, cfg.file_edit_lock_timeout_sec
-        )
+        lock_state = env_service.check_lock(lock_path, cfg.file_edit_lock_timeout_sec)
 
         return _get_templates(request).TemplateResponse(
             request,
@@ -176,10 +187,14 @@ def make_dotenv_router(
                 "env": env,
                 "url_prefix": url_prefix,
                 "dotenv_path": dotenv_path,
-                "dotenv_content": _read(dotenv_path),
-                "is_locked": is_locked,
-                "locked_since": locked_since,
-                "locked_since_ts": locked_since_ts,
+                "dotenv_content": (
+                    dotenv_path.read_text(encoding="utf-8")
+                    if dotenv_path.exists()
+                    else None
+                ),
+                "is_locked": lock_state.is_locked,
+                "locked_since": lock_state.locked_since,
+                "locked_since_ts": lock_state.locked_since_ts,
                 "lock_timeout_sec": cfg.file_edit_lock_timeout_sec,
             },
         )
