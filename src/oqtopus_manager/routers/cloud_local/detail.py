@@ -171,13 +171,19 @@ async def component_versions_list(
     env = _get_environment_or_404(name, cfg)
 
     cwd = env.resolved_root_path(cfg.default_environment_base_path)
-    output = await run_oqtopus_subcommand_output(
+    result = await run_oqtopus_subcommand_output(
         _SUBCOMMAND, ["versions", component], cwd
     )
+    if not result.ok:
+        raise HTTPException(
+            status_code=502,
+            detail=result.stderr.strip()
+            or f"oqtopus {_SUBCOMMAND} versions {component} failed",
+        )
 
     versions = [
         m.group()
-        for line in output.splitlines()
+        for line in result.stdout.splitlines()
         if (m := re.search(r"branch:\S+|v\d+[\w.+-]*", line))
     ]
     return JSONResponse({"versions": versions})

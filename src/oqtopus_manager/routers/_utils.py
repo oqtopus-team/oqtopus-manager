@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
 
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.models.environment import Environment
+
+logger = logging.getLogger(__name__)
 
 
 def _get_templates(request: Request) -> Jinja2Templates:
@@ -44,12 +47,26 @@ def _get_environment_or_404(name: str, cfg: AppConfig) -> Environment:
 async def _has_running_services(subcommand: str, root_dir: pathlib.Path) -> bool:
     """Return True if ``oqtopus <subcommand> status`` reports any running service.
 
+    Fails closed: if the status check itself cannot be completed, the state
+    is unknown, so this reports "running" rather than "no services running"
+    so callers (e.g. environment deletion) don't treat a broken status check
+    as permission to proceed.
+
     Returns:
-        True if at least one service line reports a running state.
+        True if at least one service line reports a running state, or if the
+        status check failed.
 
     """
-    output = await run_oqtopus_subcommand_output(subcommand, ["status"], root_dir)
-    for line in output.splitlines():
+    result = await run_oqtopus_subcommand_output(subcommand, ["status"], root_dir)
+    if not result.ok:
+        logger.warning(
+            "oqtopus %s status failed (returncode=%d): %s",
+            subcommand,
+            result.returncode,
+            result.stderr.strip(),
+        )
+        return True
+    for line in result.stdout.splitlines():
         _, sep, value = line.partition(":")
         if sep and value.strip().lower().startswith("running"):
             return True

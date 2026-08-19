@@ -34,13 +34,19 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
         The configured FastAPI application instance.
 
     Raises:
-        ValueError: If no environment_templates are defined in config.
+        ValueError: If no environment_templates are defined in config, or if
+            an unsupported template name is listed.
 
     """
     cfg = AppConfig.load(config_path)
 
     if not cfg.environment_templates:
         msg = "No environment_templates defined in config."
+        raise ValueError(msg)
+
+    unknown = set(cfg.environment_templates) - _TEMPLATE_ROUTERS.keys()
+    if unknown:
+        msg = f"Unsupported environment_templates: {sorted(unknown)}"
         raise ValueError(msg)
 
     # Initialize FastAPI and attach config/templates to app state
