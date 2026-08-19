@@ -1,7 +1,7 @@
 <dl id="settings-dl" class="divide-y divide-gray-200">
   <div class="flex items-center px-5 py-2">
-    <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">env_root</dt>
-    <dd class="text-sm text-gray-800 font-mono">{{ meta.env_root if meta.env_root else resolved_root_path }}</dd>
+    <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">environment_root</dt>
+    <dd class="text-sm text-gray-800 font-mono">{{ meta.environment_root if meta.environment_root else resolved_root_path }}</dd>
   </div>
   <div class="flex items-center px-5 py-2">
     <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">install_root</dt>
@@ -11,7 +11,7 @@
     <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">created_at</dt>
     <dd class="text-sm text-gray-800">{{ meta.created_at if meta.created_at else '—' }}</dd>
   </div>
-  {% set _env_root = meta.env_root if meta.env_root else resolved_root_path %}
+  {% set _env_root = meta.environment_root if meta.environment_root else resolved_root_path %}
   {% for key in version_keys %}
   {% set comp = key | replace('_version', '') %}
   <div class="flex items-center px-5 py-2" data-ver="{{ key }}">
