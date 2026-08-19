@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,6 +19,7 @@ from oqtopus_manager.util.cli import (
     run_oqtopus_subcommand_output,
     stream_oqtopus_subcommand,
 )
+from oqtopus_manager.util.parse import parse_versions
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -175,12 +175,7 @@ async def component_versions_list(
             or f"oqtopus backend versions {component} failed",
         )
 
-    versions = [
-        m.group()
-        for line in result.stdout.splitlines()
-        if (m := re.search(r"branch:\S+|v\d+[\w.+-]*", line))
-    ]
-    return JSONResponse({"versions": versions})
+    return JSONResponse({"versions": parse_versions(result)})
 
 
 @router.get(
