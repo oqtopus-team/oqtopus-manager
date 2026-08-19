@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pathlib
-import re
 from typing import TYPE_CHECKING
 
 import yaml
@@ -19,6 +18,7 @@ from oqtopus_manager.services.exceptions import (
     TopologyNotConfiguredError,
 )
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
+from oqtopus_manager.util.parse import parse_versions
 
 if TYPE_CHECKING:
     from oqtopus_manager.config import AppConfig
@@ -164,11 +164,7 @@ async def get_component_versions(
     if not result.ok:
         msg = result.stderr.strip() or f"oqtopus backend versions {component} failed"
         raise CommandFailedError(msg)
-    return [
-        m.group()
-        for line in result.stdout.splitlines()
-        if (m := re.search(r"branch:\S+|v\d+[\w.+-]*", line))
-    ]
+    return parse_versions(result)
 
 
 def _extract_path_from_yaml(
