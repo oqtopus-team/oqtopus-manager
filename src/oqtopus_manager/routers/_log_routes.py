@@ -13,11 +13,9 @@ if TYPE_CHECKING:
 
 from oqtopus_auth.fastapi import require_permission
 
-from oqtopus_manager.routers._utils import (
-    _get_config,
-    _get_environment_or_404,
-    _get_templates,
-)
+from oqtopus_manager.routers._utils import _get_config, _get_templates
+from oqtopus_manager.services import environment as env_service
+from oqtopus_manager.services.exceptions import ServiceError
 from oqtopus_manager.util.cli import stream_log_tail
 
 
@@ -45,7 +43,10 @@ def make_log_router(
     )
     async def service_log(request: Request, name: str, service: str) -> HTMLResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         resolved = env.resolved_root_path(cfg.default_environment_base_path)
         log_file = get_log_file(resolved, service)
         return _get_templates(request).TemplateResponse(
@@ -68,11 +69,14 @@ def make_log_router(
         request: Request, name: str, service: str
     ) -> StreamingResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        log_file = get_log_file(resolved, service)
-        if log_file is None or not log_file.exists():
-            raise HTTPException(status_code=404, detail="Log file not found.")
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+            resolved = env.resolved_root_path(cfg.default_environment_base_path)
+            log_file = env_service.resolve_existing_log_file(
+                get_log_file, resolved, service
+            )
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return StreamingResponse(
             stream_log_tail(log_file, cfg.log_tail_lines),
             media_type="text/event-stream",
@@ -86,11 +90,14 @@ def make_log_router(
         request: Request, name: str, service: str
     ) -> FileResponse:
         cfg = _get_config(request)
-        env = _get_environment_or_404(name, cfg)
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        log_file = get_log_file(resolved, service)
-        if log_file is None or not log_file.exists():
-            raise HTTPException(status_code=404, detail="Log file not found.")
+        try:
+            env = env_service.get_environment_or_404(name, cfg)
+            resolved = env.resolved_root_path(cfg.default_environment_base_path)
+            log_file = env_service.resolve_existing_log_file(
+                get_log_file, resolved, service
+            )
+        except ServiceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return FileResponse(
             path=log_file,
             filename=log_file.name,

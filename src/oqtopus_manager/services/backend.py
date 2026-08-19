@@ -1,4 +1,4 @@
-"""Backend-specific shared helpers."""
+"""Backend-specific business logic."""
 
 from __future__ import annotations
 
@@ -6,17 +6,39 @@ import pathlib
 from typing import TYPE_CHECKING
 
 import yaml
-from fastapi import HTTPException
 
-from oqtopus_manager.routers._file_edit import _check_lock
-from oqtopus_manager.routers._utils import _get_environment_or_404, _read_metadata
+from oqtopus_manager.services.environment import (
+    check_lock,
+    get_environment_or_404,
+    read_metadata,
+)
+from oqtopus_manager.services.exceptions import (
+    CommandFailedError,
+    InvalidArgumentError,
+    TopologyNotConfiguredError,
+)
+from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
+from oqtopus_manager.util.parse import parse_versions
 
 if TYPE_CHECKING:
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.models.environment import Environment
 
+_VALID_SERVICES = frozenset({
+    "all",
+    "core",
+    "sse_engine",
+    "mitigator",
+    "estimator",
+    "combiner",
+    "tranqu",
+    "gateway",
+})
+_VALID_COMPONENTS = frozenset({"engine", "tranqu", "gateway"})
+_VALID_STATUSES = frozenset({"active", "inactive", "maintenance"})
 
-def _build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
+
+def build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
     """Build template context for the backend list page.
 
     Returns:
@@ -26,7 +48,7 @@ def _build_list_context(environments: list[Environment], cfg: AppConfig) -> dict
     env_items = []
     for env in environments:
         resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        meta = _read_metadata(resolved)
+        meta = read_metadata(resolved)
         # All three service versions must be present for the env to be fully installed
         all_installed = bool(
             meta.get("engine_version")
@@ -42,6 +64,107 @@ def _build_list_context(environments: list[Environment], cfg: AppConfig) -> dict
         "page_description": "Manage your OQTOPUS backend environments.",
         "has_device_status": True,
     }
+
+
+def build_stream_args(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917
+    cmd: str,
+    service: str,
+    component: str,
+    version: str,
+    foreground: bool,  # noqa: FBT001
+    status: str,
+    skip_sse_build: bool,  # noqa: FBT001
+) -> list[str]:
+    """Translate validated query params into oqtopus backend argv.
+
+    Returns:
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    Raises:
+        InvalidArgumentError: If an invalid service, component, status, or
+            command is provided.
+
+    """
+    if cmd == "status":
+        return ["status"]
+    if cmd == "info":
+        return ["info"]
+    if cmd in {"start", "stop", "restart"}:
+        if service not in _VALID_SERVICES:
+            msg = f"Invalid service '{service}'"
+            raise InvalidArgumentError(msg)
+        args = [cmd, service]
+        if cmd == "start" and foreground:
+            args.append("--foreground")
+        return args
+    if cmd == "versions":
+        if component not in _VALID_COMPONENTS:
+            msg = f"Invalid component '{component}'"
+            raise InvalidArgumentError(msg)
+        return ["versions", component]
+    if cmd == "install":
+        comp = component if component in _VALID_COMPONENTS else None
+        if comp is None and component != "all":
+            msg = f"Invalid component '{component}'"
+            raise InvalidArgumentError(msg)
+        args = ["install", component]
+        if component != "all" and version:
+            args.append(version)
+        if skip_sse_build:
+            args.append("--skip-sse-build")
+        return args
+    if cmd == "update":
+        if component not in _VALID_COMPONENTS:
+            msg = f"Invalid component '{component}'"
+            raise InvalidArgumentError(msg)
+        return ["update", component]
+    if cmd == "uninstall":
+        if component not in _VALID_COMPONENTS:
+            msg = f"Invalid component '{component}'"
+            raise InvalidArgumentError(msg)
+        if not version:
+            msg = "version is required for uninstall"
+            raise InvalidArgumentError(msg)
+        return ["uninstall", component, version]
+    if cmd == "build":
+        return ["build", "sse-runtime"]
+    if cmd == "device-status-show":
+        return ["device-status", "show"]
+    if cmd == "device-status-set":
+        if status not in _VALID_STATUSES:
+            msg = f"Invalid status '{status}'"
+            raise InvalidArgumentError(msg)
+        return ["device-status", status]
+    msg = f"Unknown command '{cmd}'"
+    raise InvalidArgumentError(msg)
+
+
+async def get_component_versions(
+    cfg: AppConfig, name: str, component: str
+) -> list[str]:
+    """Run ``oqtopus backend versions <component>`` and parse the version list.
+
+    Returns:
+        Matched version strings and branch tokens, in output order.
+
+    Raises:
+        InvalidArgumentError: If the component is not recognized.
+        CommandFailedError: If the CLI invocation fails.
+
+    """
+    if component not in _VALID_COMPONENTS:
+        msg = f"Invalid component '{component}'"
+        raise InvalidArgumentError(msg)
+
+    env = get_environment_or_404(name, cfg)
+    cwd = env.resolved_root_path(cfg.default_environment_base_path)
+    result = await run_oqtopus_subcommand_output(
+        "backend", ["versions", component], cwd
+    )
+    if not result.ok:
+        msg = result.stderr.strip() or f"oqtopus backend versions {component} failed"
+        raise CommandFailedError(msg)
+    return parse_versions(result)
 
 
 def _extract_path_from_yaml(
@@ -66,7 +189,7 @@ def _extract_path_from_yaml(
     return path if path.is_absolute() else env_root / path
 
 
-def _read_path_from_yaml(
+def read_path_from_yaml(
     yaml_file: pathlib.Path, keys: list[str], env_root: pathlib.Path
 ) -> pathlib.Path | None:
     """Read a file path from a YAML file by following a chain of keys.
@@ -83,35 +206,35 @@ def _read_path_from_yaml(
         return None
 
 
-def _get_log_file(env_root: pathlib.Path, service: str) -> pathlib.Path | None:
+def get_log_file(env_root: pathlib.Path, service: str) -> pathlib.Path | None:
     """Return the log file path from the service logging.yaml, or None.
 
     Returns:
         The Path to the log file, or None if it cannot be determined.
 
     """
-    return _read_path_from_yaml(
+    return read_path_from_yaml(
         env_root / "config" / service / "logging.yaml",
         ["handlers", "file", "filename"],
         env_root,
     )
 
 
-def _get_topology_json_path(env_root: pathlib.Path) -> pathlib.Path | None:
+def get_topology_json_path(env_root: pathlib.Path) -> pathlib.Path | None:
     """Return device_topology_json_path from gateway config.yaml, or None.
 
     Returns:
         The resolved Path to the topology JSON file, or None if not configured.
 
     """
-    return _read_path_from_yaml(
+    return read_path_from_yaml(
         env_root / "config" / "gateway" / "config.yaml",
         ["device_topology_json_path"],
         env_root,
     )
 
 
-def _load_topology_context(service: str, resolved: pathlib.Path, timeout: int) -> dict:
+def load_topology_context(service: str, resolved: pathlib.Path, timeout: int) -> dict:
     """Build topology JSON template context for the service config page.
 
     Returns:
@@ -127,39 +250,37 @@ def _load_topology_context(service: str, resolved: pathlib.Path, timeout: int) -
     }
     if service != "gateway":
         return empty
-    path = _get_topology_json_path(resolved)
+    path = get_topology_json_path(resolved)
     if path is None:
         return empty
     content = path.read_text(encoding="utf-8") if path.exists() else None
     lock_path = path.parent / f"{path.name}.lock"
-    is_locked, _, locked_since, locked_since_ts = _check_lock(lock_path, timeout)
+    state = check_lock(lock_path, timeout)
     return {
         "topology_json_path": path,
         "topology_content": content,
-        "topology_is_locked": is_locked,
-        "topology_locked_since": locked_since,
-        "topology_locked_since_ts": locked_since_ts,
+        "topology_is_locked": state.is_locked,
+        "topology_locked_since": state.locked_since,
+        "topology_locked_since_ts": state.locked_since_ts,
     }
 
 
-def _resolve_topology_path(name: str, cfg: AppConfig) -> pathlib.Path:
+def resolve_topology_path(name: str, cfg: AppConfig) -> pathlib.Path:
     """Look up the topology JSON path for a named environment.
 
     Returns:
         The resolved topology JSON file Path.
 
     Raises:
-        HTTPException: If environment not found or topology path not configured.
+        TopologyNotConfiguredError: If the topology path is not configured.
 
     """
-    env = _get_environment_or_404(name, cfg)
+    env = get_environment_or_404(name, cfg)
     resolved = env.resolved_root_path(cfg.default_environment_base_path)
-    path = _get_topology_json_path(resolved)
+    path = get_topology_json_path(resolved)
     if path is None:
-        raise HTTPException(
-            status_code=404,
-            detail="device_topology_json_path not configured in gateway config.",
-        )
+        msg = "device_topology_json_path not configured in gateway config."
+        raise TopologyNotConfiguredError(msg)
     return path
 
 
@@ -201,7 +322,7 @@ _GATEWAY_FILENAME: dict[str, str] = {
 _GATEWAY_KNOWN_CONFIGS = frozenset({"config.yaml", "logging.yaml"})
 
 
-def _resolve_installed_config_path(
+def resolve_installed_config_path(
     service: str,
     filename: str,
     meta: dict[str, str],
@@ -256,7 +377,7 @@ def _resolve_installed_config_path(
     return pathlib.Path(install_root).joinpath(*release_parts)
 
 
-def _components_installed(install_root: str) -> bool:
+def components_installed(install_root: str) -> bool:
     """Return True if at least one component directory exists under install_root.
 
     Returns:
@@ -267,7 +388,17 @@ def _components_installed(install_root: str) -> bool:
     return any((root / comp).is_dir() for comp in ("engine", "tranqu", "gateway"))
 
 
-def _config_which_to_filename(which: str) -> str:
+def config_which_to_filename(which: str) -> str:
+    """Map a "config"/"logging" query param to its filename.
+
+    Returns:
+        "config.yaml" or "logging.yaml".
+
+    Raises:
+        InvalidArgumentError: If ``which`` is neither "config" nor "logging".
+
+    """
     if which not in {"config", "logging"}:
-        raise HTTPException(status_code=400, detail=f"Unknown config type: {which!r}.")
+        msg = f"Unknown config type: {which!r}."
+        raise InvalidArgumentError(msg)
     return f"{which}.yaml"

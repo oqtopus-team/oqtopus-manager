@@ -10,14 +10,17 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from oqtopus_auth.fastapi import require_permission
 
-from oqtopus_manager.routers._file_edit import (
-    _acquire_file_lock,
-    _check_lock,
-    _force_unlock_file,
-    _release_file_lock,
-    _save_file,
+from oqtopus_manager.routers._file_edit import (  # noqa: TC001 (pydantic body models FastAPI needs at runtime)
     _SaveBody,
     _UnlockBody,
+)
+from oqtopus_manager.routers._utils import _lock_error_response
+from oqtopus_manager.services import environment as env_service
+from oqtopus_manager.services.exceptions import (
+    LockConflictError,
+    LockExpiredError,
+    LockNotHeldError,
+    LockTokenMismatchError,
 )
 
 if TYPE_CHECKING:
@@ -77,19 +80,15 @@ def _build_lock_context(cfg: AppConfig) -> dict:
     """
     config_lock = cfg.config_path.parent / "config.yaml.lock"
     logging_lock = cfg.config_path.parent / "logging.yaml.lock"
-    config_is_locked, _, config_locked_since, config_locked_since_ts = _check_lock(
-        config_lock, cfg.file_edit_lock_timeout_sec
-    )
-    logging_is_locked, _, logging_locked_since, logging_locked_since_ts = _check_lock(
-        logging_lock, cfg.file_edit_lock_timeout_sec
-    )
+    config_state = env_service.check_lock(config_lock, cfg.file_edit_lock_timeout_sec)
+    logging_state = env_service.check_lock(logging_lock, cfg.file_edit_lock_timeout_sec)
     return {
-        "config_is_locked": config_is_locked,
-        "config_locked_since": config_locked_since,
-        "config_locked_since_ts": config_locked_since_ts,
-        "logging_is_locked": logging_is_locked,
-        "logging_locked_since": logging_locked_since,
-        "logging_locked_since_ts": logging_locked_since_ts,
+        "config_is_locked": config_state.is_locked,
+        "config_locked_since": config_state.locked_since,
+        "config_locked_since_ts": config_state.locked_since_ts,
+        "logging_is_locked": logging_state.is_locked,
+        "logging_locked_since": logging_state.locked_since,
+        "logging_locked_since_ts": logging_state.locked_since_ts,
         "lock_timeout_sec": cfg.file_edit_lock_timeout_sec,
     }
 
@@ -157,7 +156,8 @@ async def force_unlock_settings(request: Request, which: str) -> JSONResponse:
     """
     cfg = request.app.state.config
     file_path = _which_to_path(which, cfg)
-    return _force_unlock_file(file_path.parent / f"{file_path.name}.lock")
+    env_service.force_unlock_file(file_path.parent / f"{file_path.name}.lock")
+    return JSONResponse({"ok": True})
 
 
 @router.post(
@@ -174,7 +174,15 @@ async def acquire_settings_lock(request: Request, which: str) -> JSONResponse:
     cfg = request.app.state.config
     file_path = _which_to_path(which, cfg)
     lock_path = file_path.parent / f"{file_path.name}.lock"
-    return _acquire_file_lock(lock_path, cfg.file_edit_lock_timeout_sec)
+    try:
+        lock = env_service.acquire_file_lock(lock_path, cfg.file_edit_lock_timeout_sec)
+    except LockConflictError as exc:
+        return _lock_error_response(exc)
+    return JSONResponse({
+        "ok": True,
+        "token": lock.token,
+        "acquired_ts": lock.acquired_ts,
+    })
 
 
 @router.post(
@@ -193,7 +201,13 @@ async def release_settings_lock(
     cfg = request.app.state.config
     file_path = _which_to_path(which, cfg)
     lock_path = file_path.parent / f"{file_path.name}.lock"
-    return _release_file_lock(lock_path, body.token, cfg.file_edit_lock_timeout_sec)
+    try:
+        env_service.release_file_lock(
+            lock_path, body.token, cfg.file_edit_lock_timeout_sec
+        )
+    except LockNotHeldError as exc:
+        return _lock_error_response(exc)
+    return JSONResponse({"ok": True})
 
 
 @router.post(
@@ -210,6 +224,14 @@ async def save_settings(request: Request, which: str, body: _SaveBody) -> JSONRe
     cfg = request.app.state.config
     file_path = _which_to_path(which, cfg)
     lock_path = file_path.parent / f"{file_path.name}.lock"
-    return _save_file(
-        file_path, lock_path, body.content, body.token, cfg.file_edit_lock_timeout_sec
-    )
+    try:
+        env_service.save_file(
+            file_path,
+            lock_path,
+            body.content,
+            body.token,
+            cfg.file_edit_lock_timeout_sec,
+        )
+    except (LockExpiredError, LockTokenMismatchError) as exc:
+        return _lock_error_response(exc)
+    return JSONResponse({"ok": True})
