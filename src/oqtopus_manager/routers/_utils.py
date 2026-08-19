@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from fastapi import HTTPException, Request
 
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
+from oqtopus_manager.util.parse import parse_service_status
 
 if TYPE_CHECKING:
     import pathlib
@@ -66,11 +67,7 @@ async def _has_running_services(subcommand: str, root_dir: pathlib.Path) -> bool
             result.stderr.strip(),
         )
         return True
-    for line in result.stdout.splitlines():
-        _, sep, value = line.partition(":")
-        if sep and value.strip().lower().startswith("running"):
-            return True
-    return False
+    return any(service.running for service in parse_service_status(result))
 
 
 def _read_metadata(env_root: pathlib.Path, strip_prefix: str = "") -> dict[str, str]:
