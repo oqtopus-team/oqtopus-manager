@@ -26,6 +26,7 @@ from oqtopus_manager.services.exceptions import (
 )
 
 router = APIRouter(prefix="/backend", tags=["backend"])
+api_router = APIRouter(prefix="/api/backend", tags=["backend-api"])
 
 
 @router.get(
@@ -91,7 +92,7 @@ async def service_config(request: Request, name: str, service: str) -> HTMLRespo
     )
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/{service}/config/{which}/force-unlock",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -118,7 +119,7 @@ async def force_unlock_service_config(
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/{service}/config/{which}/lock",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -152,7 +153,7 @@ async def acquire_service_config_lock(
     })
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/{service}/config/{which}/unlock",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -184,7 +185,7 @@ async def release_service_config_lock(
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/{service}/config/{which}/save",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -222,7 +223,7 @@ async def save_service_config(
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/gateway/topology-json/force-unlock",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -247,7 +248,7 @@ async def force_unlock_gateway_topology_json(
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/gateway/topology-json/lock",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -279,7 +280,7 @@ async def acquire_gateway_topology_json_lock(
     })
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/gateway/topology-json/unlock",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -309,7 +310,7 @@ async def release_gateway_topology_json_lock(
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{name}/services/gateway/topology-json/save",
     dependencies=[require_permission("environment.config.update")],
 )
@@ -343,7 +344,7 @@ async def save_gateway_topology_json(
     return JSONResponse({"ok": True})
 
 
-@router.get(
+@api_router.get(
     "/{name}/services/gateway/topology-json/download",
     dependencies=[require_permission("environment.config.get")],
 )
@@ -368,7 +369,7 @@ async def gateway_topology_json_download(request: Request, name: str) -> FileRes
     return FileResponse(path=path, filename=path.name, media_type="application/json")
 
 
-@router.get(
+@api_router.get(
     "/{name}/services/{service}/config/{which}/release-diff",
     dependencies=[require_permission("environment.config.get")],
 )
@@ -388,13 +389,12 @@ async def service_config_release_diff(
     try:
         env = env_service.get_environment_or_404(name, cfg)
         filename = backend_service.config_which_to_filename(which)
+        resolved = env.resolved_root_path(cfg.default_environment_base_path)
+        installed_path = await backend_service.resolve_installed_config_path_via_info(
+            cfg, name, service, filename, resolved
+        )
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    resolved = env.resolved_root_path(cfg.default_environment_base_path)
-    meta = env_service.read_metadata(resolved)
-    installed_path = backend_service.resolve_installed_config_path(
-        service, filename, meta, resolved
-    )
     installed_content = None
     if installed_path is not None and installed_path.exists():
         installed_content = installed_path.read_text(encoding="utf-8")
@@ -404,7 +404,7 @@ async def service_config_release_diff(
     })
 
 
-@router.get(
+@api_router.get(
     "/{name}/services/gateway/topology-json/release-diff",
     dependencies=[require_permission("environment.config.get")],
 )
@@ -424,13 +424,12 @@ async def gateway_topology_json_release_diff(
     try:
         env = env_service.get_environment_or_404(name, cfg)
         current_path = backend_service.resolve_topology_path(name, cfg)
+        resolved = env.resolved_root_path(cfg.default_environment_base_path)
+        installed_path = await backend_service.resolve_installed_config_path_via_info(
+            cfg, name, "gateway", current_path.name, resolved
+        )
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    resolved = env.resolved_root_path(cfg.default_environment_base_path)
-    meta = env_service.read_metadata(resolved)
-    installed_path = backend_service.resolve_installed_config_path(
-        "gateway", current_path.name, meta, resolved
-    )
     installed_content = None
     if installed_path is not None and installed_path.exists():
         installed_content = installed_path.read_text(encoding="utf-8")

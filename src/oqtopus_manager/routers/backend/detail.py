@@ -1,4 +1,4 @@
-"""Routes for backend detail, settings-partial, stream, and component-versions."""
+"""Backend detail HTML page, plus its /api/backend JSON/Server-Sent Events routes."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from oqtopus_auth.fastapi import require_permission
 
+from oqtopus_manager.routers._problem import problem_response
 from oqtopus_manager.routers._utils import _get_config, _get_templates
 from oqtopus_manager.services import backend as backend_service
 from oqtopus_manager.services import environment as env_service
@@ -19,7 +20,11 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
 router = APIRouter(prefix="/backend", tags=["backend"])
+api_router = APIRouter(prefix="/api/backend", tags=["backend-api"])
 logger = logging.getLogger(__name__)
+
+
+# ── HTML pages ───────────────────────────────────────────────────────────────
 
 
 @router.get(
@@ -40,48 +45,55 @@ async def get_settings_partial(request: Request, name: str) -> HTMLResponse:
     cfg = _get_config(request)
     try:
         env = env_service.get_environment_or_404(name, cfg)
+        info = await backend_service.get_info(cfg, name)
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     resolved = env.resolved_root_path(cfg.default_environment_base_path)
-    meta = env_service.read_metadata(resolved)
     return _get_templates(request).TemplateResponse(
         request,
         "environments/_settings_dl.html",
-        {
-            "meta": meta,
-            "resolved_root_path": resolved,
-            "version_keys": ["engine_version", "tranqu_version", "gateway_version"],
-        },
+        {"info": info, "resolved_root_path": resolved},
     )
 
 
 @router.get(
-    "/{name}/component-versions",
+    "/{name}",
+    response_class=HTMLResponse,
     dependencies=[require_permission("environment.get")],
 )
-async def component_versions_list(
-    request: Request,
-    name: str,
-    component: str,
-) -> JSONResponse:
-    """Run oqtopus backend versions <component> and return parsed version list.
+async def get_environment(request: Request, name: str) -> HTMLResponse:
+    """Render the environment detail page.
 
     Returns:
-        JSONResponse with a list of version strings.
+        HTMLResponse with the environment detail page.
 
     Raises:
-        HTTPException: If the component is invalid or environment is not found.
+        HTTPException: If the environment is not found.
 
     """
     cfg = _get_config(request)
     try:
-        versions = await backend_service.get_component_versions(cfg, name, component)
+        env = env_service.get_environment_or_404(name, cfg)
+        info = await backend_service.get_info(cfg, name)
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    return JSONResponse({"versions": versions})
+    resolved = env.resolved_root_path(cfg.default_environment_base_path)
+    ctx: dict = {
+        "env": env,
+        "resolved_root_path": resolved,
+        "info": info,
+        "all_versions_installed": info.all_installed,
+        "components": backend_service.COMPONENTS,
+    }
+    return _get_templates(request).TemplateResponse(
+        request, "environments/backend_detail.html", ctx
+    )
 
 
-@router.get(
+# ── /api/backend JSON + Server-Sent Events ──────────────────────────────────
+
+
+@api_router.get(
     "/{name}/stream",
     dependencies=[require_permission("environment.service.manage")],
 )
@@ -96,10 +108,11 @@ async def backend_stream(  # noqa: PLR0913, PLR0917
     status: str = "",
     skip_sse_build: bool = False,  # noqa: FBT001, FBT002
 ) -> StreamingResponse:
-    """SSE endpoint: run an oqtopus backend subcommand and stream its output.
+    """Run an oqtopus backend subcommand and stream its output as Server-Sent Events.
 
     Returns:
-        StreamingResponse with SSE-formatted output from the backend command.
+        StreamingResponse with Server-Sent Events-formatted output from the
+        backend command.
 
     Raises:
         HTTPException: If the environment is not found or command arguments are invalid.
@@ -124,39 +137,85 @@ async def backend_stream(  # noqa: PLR0913, PLR0917
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.get(
-    "/{name}",
-    response_class=HTMLResponse,
+@api_router.get(
+    "/{name}/status",
     dependencies=[require_permission("environment.get")],
 )
-async def get_environment(request: Request, name: str) -> HTMLResponse:
-    """Render the environment detail page.
+async def get_status(request: Request, name: str) -> JSONResponse:
+    """Run ``oqtopus backend status`` and return it as JSON.
 
     Returns:
-        HTMLResponse with the environment detail page.
-
-    Raises:
-        HTTPException: If the environment is not found.
+        JSONResponse with StatusData, or an RFC 9457 problem response.
 
     """
     cfg = _get_config(request)
     try:
-        env = env_service.get_environment_or_404(name, cfg)
+        data = await backend_service.get_status(cfg, name)
     except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    resolved = env.resolved_root_path(cfg.default_environment_base_path)
-    meta = env_service.read_metadata(resolved)
-    ctx: dict = {
-        "env": env,
-        "resolved_root_path": resolved,
-        "meta": meta,
-        "all_versions_installed": bool(
-            meta.get("engine_version")
-            and meta.get("tranqu_version")
-            and meta.get("gateway_version")
-        ),
-        "version_keys": ["engine_version", "tranqu_version", "gateway_version"],
-    }
-    return _get_templates(request).TemplateResponse(
-        request, "environments/backend_detail.html", ctx
-    )
+        return problem_response(exc)
+    return JSONResponse(data.model_dump())
+
+
+@api_router.get(
+    "/{name}/device-status",
+    dependencies=[require_permission("environment.get")],
+)
+async def get_device_status(request: Request, name: str) -> JSONResponse:
+    """Run ``oqtopus backend device-status show`` and return it as JSON.
+
+    Returns:
+        JSONResponse with DeviceStatusData, or an RFC 9457 problem response.
+
+    """
+    cfg = _get_config(request)
+    try:
+        data = await backend_service.get_device_status(cfg, name)
+    except ServiceError as exc:
+        return problem_response(exc)
+    return JSONResponse(data.model_dump())
+
+
+@api_router.get(
+    "/{name}",
+    dependencies=[require_permission("environment.get")],
+)
+async def get_environment_info(request: Request, name: str) -> JSONResponse:
+    """Run ``oqtopus backend info`` and return it as JSON (the environment resource).
+
+    Returns:
+        JSONResponse with EnvironmentData, or an RFC 9457 problem response.
+
+    """
+    cfg = _get_config(request)
+    try:
+        data = await backend_service.get_info(cfg, name)
+    except ServiceError as exc:
+        return problem_response(exc)
+    return JSONResponse(data.model_dump())
+
+
+@api_router.get(
+    "/{name}/components/{component}/versions",
+    dependencies=[require_permission("environment.get")],
+)
+async def get_component_versions(
+    request: Request, name: str, component: str
+) -> JSONResponse:
+    """Run ``oqtopus backend versions <component>`` and return it as JSON.
+
+    Replaces the old ``GET /backend/{name}/component-versions?component=``:
+    path and response shape both change, so this is a breaking change
+    rather than a plain /api move.
+
+    Returns:
+        JSONResponse with VersionsData, or an RFC 9457 problem response.
+
+    """
+    cfg = _get_config(request)
+    try:
+        data = await backend_service.get_component_versions_detailed(
+            cfg, name, component
+        )
+    except ServiceError as exc:
+        return problem_response(exc)
+    return JSONResponse(data.model_dump())

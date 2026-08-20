@@ -9,16 +9,25 @@ import time
 import uuid
 from types import SimpleNamespace
 from typing import Self
+from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 from pytest_mock import MockerFixture
 
+from oqtopus_manager.models.environment import Environment
 from oqtopus_manager.services import environment as env_service
 from oqtopus_manager.services.exceptions import (
+    CliNotFoundError,
+    CliTimeoutError,
+    CommandFailedError,
+    EnvironmentAlreadyExistsError,
     LockConflictError,
     LockExpiredError,
     LockNotHeldError,
     LockTokenMismatchError,
+    ReservedEnvironmentNameError,
+    ServiceError,
 )
 from oqtopus_manager.util.cli import CommandResult
 
@@ -50,7 +59,7 @@ async def test_has_running_services_true_when_any_service_running(
             stderr="",
         ),
     )
-    assert await env_service.has_running_services("cloud-local", tmp_path) is True
+    assert await env_service.has_running_services("cloud-local", tmp_path, 10) is True
 
 
 @pytest.mark.anyio
@@ -63,7 +72,7 @@ async def test_has_running_services_false_when_all_stopped(
             returncode=0, stdout="db: Stopped\nworker: Stopped\n", stderr=""
         ),
     )
-    assert await env_service.has_running_services("cloud-local", tmp_path) is False
+    assert await env_service.has_running_services("cloud-local", tmp_path, 10) is False
 
 
 @pytest.mark.anyio
@@ -75,7 +84,7 @@ async def test_has_running_services_false_on_empty_output(
         "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(returncode=0, stdout="", stderr=""),
     )
-    assert await env_service.has_running_services("backend", tmp_path) is False
+    assert await env_service.has_running_services("backend", tmp_path, 10) is False
 
 
 @pytest.mark.anyio
@@ -88,7 +97,7 @@ async def test_has_running_services_is_case_insensitive(
             returncode=0, stdout="core: RUNNING (PID 1)\n", stderr=""
         ),
     )
-    assert await env_service.has_running_services("backend", tmp_path) is True
+    assert await env_service.has_running_services("backend", tmp_path, 10) is True
 
 
 @pytest.mark.anyio
@@ -105,7 +114,7 @@ async def test_has_running_services_fails_closed_on_command_failure(
             returncode=1, stdout="", stderr="connection to remote fleet failed"
         ),
     )
-    assert await env_service.has_running_services("backend", tmp_path) is True
+    assert await env_service.has_running_services("backend", tmp_path, 10) is True
 
 
 @pytest.mark.anyio
@@ -120,7 +129,7 @@ async def test_has_running_services_fails_closed_when_cli_not_found(
             stderr="oqtopus command not found. Please install oqtopus-cli first.",
         ),
     )
-    assert await env_service.has_running_services("backend", tmp_path) is True
+    assert await env_service.has_running_services("backend", tmp_path, 10) is True
 
 
 # ── check_lock ───────────────────────────────────────────────────────────────
@@ -279,3 +288,234 @@ class TestSaveFile:
             env_service.save_file(file_path, lock_path, f"ITER={i}", tok, 600)
         backups = list(tmp_path.glob("test.env.*"))
         assert len(backups) == n_saves
+
+
+# ── raise_for_command_result ─────────────────────────────────────────────────
+
+
+class TestRaiseForCommandResult:
+    def test_ok_does_not_raise(self) -> None:
+        env_service.raise_for_command_result(
+            CommandResult(returncode=0, stdout="", stderr="")
+        )
+
+    def test_timeout_raises_cli_timeout_error(self) -> None:
+        with pytest.raises(CliTimeoutError):
+            env_service.raise_for_command_result(
+                CommandResult(returncode=None, stdout="", stderr="timed out")
+            )
+
+    def test_127_raises_cli_not_found_error(self) -> None:
+        with pytest.raises(CliNotFoundError):
+            env_service.raise_for_command_result(
+                CommandResult(returncode=127, stdout="", stderr="not found")
+            )
+
+    def test_other_nonzero_raises_command_failed_error(self) -> None:
+        with pytest.raises(CommandFailedError) as exc_info:
+            env_service.raise_for_command_result(
+                CommandResult(returncode=1, stdout="", stderr="boom")
+            )
+        assert exc_info.value.returncode == 1
+        assert "boom" in str(exc_info.value)
+
+
+# ── reserved environment names ───────────────────────────────────────────────
+
+
+class TestReservedEnvironmentNames:
+    def test_validate_new_environment_rejects_reserved_name(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        cfg = MagicMock(load_environments=lambda: [])
+        with pytest.raises(ReservedEnvironmentNameError):
+            env_service.validate_new_environment(cfg, "new", "backend", "")
+
+    def test_validate_new_environment_rejects_stream(self) -> None:
+        cfg = MagicMock(load_environments=lambda: [])
+        with pytest.raises(ReservedEnvironmentNameError):
+            env_service.validate_new_environment(cfg, "stream", "backend", "")
+
+    def test_validate_new_environment_allows_non_reserved_name(self) -> None:
+        cfg = MagicMock(load_environments=lambda: [])
+        env_service.validate_new_environment(cfg, "my-env", "backend", "")  # no raise
+
+    def test_existing_name_check_still_wins_only_when_not_reserved(self) -> None:
+        cfg = MagicMock(
+            load_environments=lambda: [Environment(name="dup", template="backend")]
+        )
+        with pytest.raises(EnvironmentAlreadyExistsError):
+            env_service.validate_new_environment(cfg, "dup", "backend", "")
+
+    def test_check_reserved_environment_names_detects_collision(self) -> None:
+        cfg = MagicMock(
+            load_environments=lambda: [
+                Environment(name="new", template="backend"),
+                Environment(name="ok-env", template="backend"),
+            ]
+        )
+        assert env_service.check_reserved_environment_names(cfg) == ["new"]
+
+    def test_check_reserved_environment_names_empty_when_none_collide(self) -> None:
+        cfg = MagicMock(
+            load_environments=lambda: [Environment(name="ok-env", template="backend")]
+        )
+        assert env_service.check_reserved_environment_names(cfg) == []
+
+
+# ── build_environment_list ───────────────────────────────────────────────────
+
+
+class _FakeData(BaseModel):
+    """Stand-in for the real backend/cloud_local pydantic models in these tests."""
+
+    name: str | None = None
+    all_installed: bool | None = None
+    state: str | None = None
+    device_status: str | None = None
+
+
+class TestBuildEnvironmentList:
+    @pytest.mark.anyio
+    async def test_reports_per_environment_data(self) -> None:
+        cfg = MagicMock()
+        envs = [Environment(name="a", template="backend")]
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            return _FakeData(name=name, all_installed=True)
+
+        async def get_status(cfg: object, name: str) -> _FakeData:
+            return _FakeData(state="running")
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "backend",
+            include_status=True, has_device_status=False,
+            get_info=get_info, get_status=get_status, get_device_status=None,
+        )
+        assert result["template"] == "backend"
+        entry = result["environments"][0]
+        assert entry["name"] == "a"
+        assert entry["environment"].data.name == "a"
+        assert entry["status"].data.state == "running"
+
+    @pytest.mark.anyio
+    async def test_status_not_fetched_when_not_all_installed(self) -> None:
+        cfg = MagicMock()
+        envs = [Environment(name="a", template="backend")]
+        status_calls = []
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            return _FakeData(all_installed=False)
+
+        async def get_status(cfg: object, name: str) -> _FakeData:
+            status_calls.append(name)
+            return _FakeData()
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "backend",
+            include_status=True, has_device_status=False,
+            get_info=get_info, get_status=get_status, get_device_status=None,
+        )
+        assert status_calls == []
+        assert result["environments"][0]["status"] is None
+
+    @pytest.mark.anyio
+    async def test_status_not_fetched_when_include_status_false(self) -> None:
+        cfg = MagicMock()
+        envs = [Environment(name="a", template="backend")]
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            return _FakeData(all_installed=True)
+
+        async def get_status(cfg: object, name: str) -> _FakeData:
+            msg = "must not be called"
+            raise AssertionError(msg)
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "backend",
+            include_status=False, has_device_status=False,
+            get_info=get_info, get_status=get_status, get_device_status=None,
+        )
+        assert result["environments"][0]["status"] is None
+
+    @pytest.mark.anyio
+    async def test_info_failure_is_captured_as_error_outcome(self) -> None:
+        cfg = MagicMock()
+        envs = [Environment(name="a", template="backend")]
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            raise CommandFailedError("boom", returncode=1)
+
+        async def get_status(cfg: object, name: str) -> _FakeData:
+            msg = "must not be called"
+            raise AssertionError(msg)
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "backend",
+            include_status=True, has_device_status=False,
+            get_info=get_info, get_status=get_status, get_device_status=None,
+        )
+        entry = result["environments"][0]
+        assert entry["environment"].data is None
+        assert isinstance(entry["environment"].error, ServiceError)
+        assert entry["status"] is None
+
+    @pytest.mark.anyio
+    async def test_one_environment_failing_does_not_affect_others(self) -> None:
+        cfg = MagicMock()
+        envs = [
+            Environment(name="broken", template="backend"),
+            Environment(name="ok", template="backend"),
+        ]
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            if name == "broken":
+                raise CommandFailedError("boom", returncode=1)
+            return _FakeData(all_installed=False)
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "backend",
+            include_status=False, has_device_status=False,
+            get_info=get_info, get_status=get_info, get_device_status=None,
+        )
+        by_name = {e["name"]: e for e in result["environments"]}
+        assert by_name["broken"]["environment"].error is not None
+        assert by_name["ok"]["environment"].data is not None
+
+    @pytest.mark.anyio
+    async def test_device_status_fetched_for_backend_when_all_installed(self) -> None:
+        cfg = MagicMock()
+        envs = [Environment(name="a", template="backend")]
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            return _FakeData(all_installed=True)
+
+        async def get_status(cfg: object, name: str) -> _FakeData:
+            return _FakeData()
+
+        async def get_device_status(cfg: object, name: str) -> _FakeData:
+            return _FakeData(device_status="active")
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "backend",
+            include_status=True, has_device_status=True,
+            get_info=get_info, get_status=get_status,
+            get_device_status=get_device_status,
+        )
+        entry = result["environments"][0]
+        assert entry["device_status"].data.device_status == "active"
+
+    @pytest.mark.anyio
+    async def test_no_device_status_key_when_has_device_status_false(self) -> None:
+        cfg = MagicMock()
+        envs = [Environment(name="a", template="backend")]
+
+        async def get_info(cfg: object, name: str) -> _FakeData:
+            return _FakeData(all_installed=False)
+
+        result = await env_service.build_environment_list(
+            cfg, envs, "cloud-local",
+            include_status=True, has_device_status=False,
+            get_info=get_info, get_status=get_info, get_device_status=None,
+        )
+        assert "device_status" not in result["environments"][0]

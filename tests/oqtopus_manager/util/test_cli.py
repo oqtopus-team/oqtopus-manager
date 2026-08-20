@@ -208,7 +208,7 @@ async def test_run_oqtopus_subcommand_output_not_found(
         "asyncio.create_subprocess_exec",
         new=AsyncMock(side_effect=FileNotFoundError),
     )
-    result = await run_oqtopus_subcommand_output("backend", ["status"], tmp_path)
+    result = await run_oqtopus_subcommand_output("backend", ["status"], tmp_path, 10)
     assert result == CommandResult(
         returncode=127,
         stdout="",
@@ -232,7 +232,7 @@ async def test_run_oqtopus_subcommand_output_returns_stdout(
         new=AsyncMock(return_value=_Proc()),
     )
     result = await run_oqtopus_subcommand_output(
-        "backend", ["versions", "engine"], tmp_path
+        "backend", ["versions", "engine"], tmp_path, 10
     )
     assert result == CommandResult(returncode=0, stdout="v1.2.3\n", stderr="")
     assert result.ok is True
@@ -256,8 +256,38 @@ async def test_run_oqtopus_subcommand_output_reports_failure(
         "asyncio.create_subprocess_exec",
         new=AsyncMock(return_value=_Proc()),
     )
-    result = await run_oqtopus_subcommand_output("backend", ["status"], tmp_path)
+    result = await run_oqtopus_subcommand_output("backend", ["status"], tmp_path, 10)
     assert result.ok is False
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == "remote status check failed\n"
+
+
+@pytest.mark.anyio
+async def test_run_oqtopus_subcommand_output_timeout(
+    tmp_path: pathlib.Path, mocker: MockerFixture
+) -> None:
+    class _SlowProc:
+        returncode = None
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            await asyncio.sleep(10)
+            return b"", b""
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        async def wait(self) -> None:
+            return None
+
+    mocker.patch(
+        "asyncio.create_subprocess_exec",
+        new=AsyncMock(return_value=_SlowProc()),
+    )
+    result = await run_oqtopus_subcommand_output(
+        "backend", ["status"], tmp_path, 0.05
+    )
+    assert result.timed_out is True
+    assert result.returncode is None
+    assert result.ok is False
+    assert "timed out" in result.stderr

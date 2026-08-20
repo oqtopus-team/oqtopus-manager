@@ -81,6 +81,24 @@ def mock_stream_failure(mocker: MockerFixture) -> None:
     mocker.patch("oqtopus_manager.services.environment.stream_oqtopus_init", side_effect=_gen)
 
 
+@pytest.fixture
+def mock_backend_info_empty(mocker: MockerFixture) -> None:
+    """Mock `oqtopus backend info` (used by the detail/settings-partial pages)."""
+    mocker.patch(
+        "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+        return_value=CommandResult(returncode=0, stdout="", stderr=""),
+    )
+
+
+@pytest.fixture
+def mock_cloud_local_info_empty(mocker: MockerFixture) -> None:
+    """Mock `oqtopus cloud-local info` (used by the detail/settings-partial pages)."""
+    mocker.patch(
+        "oqtopus_manager.services.cloud_local.run_oqtopus_subcommand_output",
+        return_value=CommandResult(returncode=0, stdout="", stderr=""),
+    )
+
+
 def test_root_redirects_to_backend(client: TestClient) -> None:
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 307
@@ -93,28 +111,28 @@ def test_list_environments_empty(client: TestClient) -> None:
 
 
 def test_create_environment_returns_ok(client: TestClient) -> None:
-    response = client.post("/backend", data={"name": "demo", "template": "backend", "root_path": ""})
+    response = client.post("/api/backend", data={"name": "demo", "template": "backend", "root_path": ""})
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
 
 def test_create_environment_invalid_name_returns_422(client: TestClient) -> None:
-    response = client.post("/backend", data={"name": "MyEnv", "template": "backend", "root_path": ""})
+    response = client.post("/api/backend", data={"name": "MyEnv", "template": "backend", "root_path": ""})
     assert response.status_code == 422
     assert response.json()["ok"] is False
     assert "error" in response.json()
 
 
 def test_create_duplicate_environment_returns_409(client: TestClient, mock_stream_success: None) -> None:
-    client.get("/backend/stream?name=demo&template=backend")
-    response = client.post("/backend", data={"name": "demo", "template": "backend", "root_path": ""})
+    client.get("/api/backend/stream?name=demo&template=backend")
+    response = client.post("/api/backend", data={"name": "demo", "template": "backend", "root_path": ""})
     assert response.status_code == 409
     assert response.json()["ok"] is False
     assert "already exists" in response.json()["error"]
 
 
 def test_stream_success_saves_environment(client: TestClient, mock_stream_success: None) -> None:
-    response = client.get("/backend/stream?name=demo&template=backend")
+    response = client.get("/api/backend/stream?name=demo&template=backend")
     assert response.status_code == 200
     assert b"event: done" in response.content
     assert b"success" in response.content
@@ -123,13 +141,15 @@ def test_stream_success_saves_environment(client: TestClient, mock_stream_succes
 
 
 def test_stream_failure_does_not_save_environment(client: TestClient, mock_stream_failure: None) -> None:
-    client.get("/backend/stream?name=demo&template=backend")
+    client.get("/api/backend/stream?name=demo&template=backend")
     list_response = client.get("/backend")
     assert b"demo" not in list_response.content
 
 
-def test_get_environment_detail(client: TestClient, mock_stream_success: None) -> None:
-    client.get("/backend/stream?name=demo&template=backend")
+def test_get_environment_detail(
+    client: TestClient, mock_stream_success: None, mock_backend_info_empty: None
+) -> None:
+    client.get("/api/backend/stream?name=demo&template=backend")
     response = client.get("/backend/demo")
     assert response.status_code == 200
     assert b"demo" in response.content
@@ -146,14 +166,14 @@ def test_delete_environment(
     tmp_path: pathlib.Path,
     mocker: MockerFixture,
 ) -> None:
-    client.get("/backend/stream?name=myenv&template=backend")
+    client.get("/api/backend/stream?name=myenv&template=backend")
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
         "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(returncode=0, stdout="", stderr=""),
     )
-    response = client.request("DELETE", "/backend/myenv")
+    response = client.request("DELETE", "/api/backend/myenv")
     assert response.status_code == 200
     assert b"myenv" not in response.content
     assert not env_dir.exists()
@@ -163,13 +183,13 @@ def test_delete_environment_without_directory(
     client: TestClient, mock_stream_success: None
 ) -> None:
     """Delete should succeed even if the directory is already gone."""
-    client.get("/backend/stream?name=myenv&template=backend")
-    response = client.request("DELETE", "/backend/myenv")
+    client.get("/api/backend/stream?name=myenv&template=backend")
+    response = client.request("DELETE", "/api/backend/myenv")
     assert response.status_code == 200
 
 
 def test_delete_nonexistent_environment_returns_404(client: TestClient) -> None:
-    response = client.request("DELETE", "/backend/nonexistent")
+    response = client.request("DELETE", "/api/backend/nonexistent")
     assert response.status_code == 404
 
 
@@ -179,7 +199,7 @@ def test_delete_environment_blocked_while_running(
     tmp_path: pathlib.Path,
     mocker: MockerFixture,
 ) -> None:
-    client.get("/backend/stream?name=myenv&template=backend")
+    client.get("/api/backend/stream?name=myenv&template=backend")
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
@@ -191,7 +211,7 @@ def test_delete_environment_blocked_while_running(
         ),
     )
 
-    response = client.request("DELETE", "/backend/myenv")
+    response = client.request("DELETE", "/api/backend/myenv")
 
     assert response.status_code == 409
     assert "myenv" in response.json()["detail"]
@@ -284,7 +304,7 @@ def test_cloud_local_create_environment_returns_ok(
     cloud_local_client: TestClient,
 ) -> None:
     resp = cloud_local_client.post(
-        "/cloud-local",
+        "/api/cloud-local",
         data={"name": "cl-demo", "template": "cloud-local", "root_path": ""},
     )
     assert resp.status_code == 200
@@ -295,7 +315,7 @@ def test_cloud_local_create_invalid_name_returns_422(
     cloud_local_client: TestClient,
 ) -> None:
     resp = cloud_local_client.post(
-        "/cloud-local",
+        "/api/cloud-local",
         data={"name": "MyEnv!", "template": "cloud-local", "root_path": ""},
     )
     assert resp.status_code == 422
@@ -305,9 +325,9 @@ def test_cloud_local_create_invalid_name_returns_422(
 def test_cloud_local_create_duplicate_returns_409(
     cloud_local_client: TestClient, mock_cl_stream_success: None
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     resp = cloud_local_client.post(
-        "/cloud-local",
+        "/api/cloud-local",
         data={"name": "cl-demo", "template": "cloud-local", "root_path": ""},
     )
     assert resp.status_code == 409
@@ -317,7 +337,7 @@ def test_cloud_local_stream_success_saves_environment(
     cloud_local_client: TestClient, mock_cl_stream_success: None
 ) -> None:
     resp = cloud_local_client.get(
-        "/cloud-local/stream?name=cl-demo&template=cloud-local"
+        "/api/cloud-local/stream?name=cl-demo&template=cloud-local"
     )
     assert resp.status_code == 200
     assert b"success" in resp.content
@@ -325,9 +345,11 @@ def test_cloud_local_stream_success_saves_environment(
 
 
 def test_cloud_local_get_environment_detail(
-    cloud_local_client: TestClient, mock_cl_stream_success: None
+    cloud_local_client: TestClient,
+    mock_cl_stream_success: None,
+    mock_cloud_local_info_empty: None,
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     resp = cloud_local_client.get("/cloud-local/cl-demo")
     assert resp.status_code == 200
     assert b"cl-demo" in resp.content
@@ -345,14 +367,14 @@ def test_cloud_local_delete_environment(
     tmp_path: pathlib.Path,
     mocker: MockerFixture,
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     env_dir = tmp_path / "environments" / "cl-demo"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
         "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
         return_value=CommandResult(returncode=0, stdout="", stderr=""),
     )
-    resp = cloud_local_client.request("DELETE", "/cloud-local/cl-demo")
+    resp = cloud_local_client.request("DELETE", "/api/cloud-local/cl-demo")
     assert resp.status_code == 200
     assert not env_dir.exists()
 
@@ -361,7 +383,7 @@ def test_cloud_local_delete_nonexistent_returns_404(
     cloud_local_client: TestClient,
 ) -> None:
     assert (
-        cloud_local_client.request("DELETE", "/cloud-local/nonexistent").status_code
+        cloud_local_client.request("DELETE", "/api/cloud-local/nonexistent").status_code
         == 404
     )
 
@@ -372,7 +394,7 @@ def test_cloud_local_delete_blocked_while_running(
     tmp_path: pathlib.Path,
     mocker: MockerFixture,
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     env_dir = tmp_path / "environments" / "cl-demo"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
@@ -384,7 +406,7 @@ def test_cloud_local_delete_blocked_while_running(
         ),
     )
 
-    resp = cloud_local_client.request("DELETE", "/cloud-local/cl-demo")
+    resp = cloud_local_client.request("DELETE", "/api/cloud-local/cl-demo")
 
     assert resp.status_code == 409
     assert "cl-demo" in resp.json()["detail"]
@@ -395,9 +417,9 @@ def test_cloud_local_delete_blocked_while_running(
 
 
 def test_backend_settings_partial(
-    client: TestClient, mock_stream_success: None
+    client: TestClient, mock_stream_success: None, mock_backend_info_empty: None
 ) -> None:
-    client.get("/backend/stream?name=demo&template=backend")
+    client.get("/api/backend/stream?name=demo&template=backend")
     resp = client.get("/backend/demo/settings-partial")
     assert resp.status_code == 200
 
@@ -411,22 +433,24 @@ def test_backend_settings_partial_nonexistent_returns_404(
 def test_backend_component_versions_invalid_component_returns_400(
     client: TestClient, mock_stream_success: None
 ) -> None:
-    client.get("/backend/stream?name=demo&template=backend")
-    resp = client.get("/backend/demo/component-versions?component=invalid")
+    client.get("/api/backend/stream?name=demo&template=backend")
+    resp = client.get("/api/backend/demo/components/invalid/versions")
     assert resp.status_code == 400
 
 
 def test_backend_component_versions_nonexistent_env_returns_404(
     client: TestClient,
 ) -> None:
-    resp = client.get("/backend/nonexistent/component-versions?component=engine")
+    resp = client.get("/api/backend/nonexistent/components/engine/versions")
     assert resp.status_code == 404
 
 
 def test_cloud_local_settings_partial(
-    cloud_local_client: TestClient, mock_cl_stream_success: None
+    cloud_local_client: TestClient,
+    mock_cl_stream_success: None,
+    mock_cloud_local_info_empty: None,
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     resp = cloud_local_client.get("/cloud-local/cl-demo/settings-partial")
     assert resp.status_code == 200
 
@@ -434,9 +458,9 @@ def test_cloud_local_settings_partial(
 def test_cloud_local_component_versions_invalid_returns_400(
     cloud_local_client: TestClient, mock_cl_stream_success: None
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     resp = cloud_local_client.get(
-        "/cloud-local/cl-demo/component-versions?component=invalid"
+        "/api/cloud-local/cl-demo/components/invalid/versions"
     )
     assert resp.status_code == 400
 
@@ -620,14 +644,14 @@ def test_settings_page_renders(client: TestClient) -> None:
 def test_settings_lock_acquire_and_release(
     client: TestClient, tmp_path: pathlib.Path
 ) -> None:
-    resp = client.post("/settings/config/lock")
+    resp = client.post("/api/settings/config/lock")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
     token = data["token"]
 
     resp = client.post(
-        "/settings/config/unlock",
+        "/api/settings/config/unlock",
         json={"token": token},
         headers={"Content-Type": "application/json"},
     )
@@ -635,12 +659,12 @@ def test_settings_lock_acquire_and_release(
 
 
 def test_settings_save_config(client: TestClient, tmp_path: pathlib.Path) -> None:
-    resp = client.post("/settings/config/lock")
+    resp = client.post("/api/settings/config/lock")
     token = resp.json()["token"]
 
     new_content = (tmp_path / "config.yaml").read_text(encoding="utf-8")
     resp = client.post(
-        "/settings/config/save",
+        "/api/settings/config/save",
         json={"token": token, "content": new_content},
         headers={"Content-Type": "application/json"},
     )
@@ -648,13 +672,13 @@ def test_settings_save_config(client: TestClient, tmp_path: pathlib.Path) -> Non
 
 
 def test_settings_invalid_which_returns_400(client: TestClient) -> None:
-    resp = client.post("/settings/invalid/lock")
+    resp = client.post("/api/settings/invalid/lock")
     assert resp.status_code == 400
 
 
 def test_settings_force_unlock(client: TestClient) -> None:
-    client.post("/settings/config/lock")
-    resp = client.post("/settings/config/force-unlock")
+    client.post("/api/settings/config/lock")
+    resp = client.post("/api/settings/config/force-unlock")
     assert resp.json()["ok"] is True
 
 
@@ -734,7 +758,7 @@ def test_debug_page_with_malformed_jwt_shows_error(
 def test_backend_component_versions_returns_parsed_list(
     client: TestClient, mock_stream_success: None, mocker: MockerFixture
 ) -> None:
-    client.get("/backend/stream?name=demo&template=backend")
+    client.get("/api/backend/stream?name=demo&template=backend")
     mocker.patch(
         "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
         return_value=CommandResult(
@@ -743,26 +767,26 @@ def test_backend_component_versions_returns_parsed_list(
             stderr="",
         ),
     )
-    resp = client.get("/backend/demo/component-versions?component=engine")
+    resp = client.get("/api/backend/demo/components/engine/versions")
     assert resp.status_code == 200
     data = resp.json()
-    assert "versions" in data
-    assert "v1.0.0" in data["versions"]
-    assert "v1.1.0" in data["versions"]
+    versions = [v["version"] for v in data["versions"]]
+    assert "v1.0.0" in versions
+    assert "v1.1.0" in versions
 
 
 def test_backend_component_versions_command_failure_returns_502(
     client: TestClient, mock_stream_success: None, mocker: MockerFixture
 ) -> None:
     """A failed CLI invocation must surface as an error, not an empty list."""
-    client.get("/backend/stream?name=demo&template=backend")
+    client.get("/api/backend/stream?name=demo&template=backend")
     mocker.patch(
         "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
         return_value=CommandResult(
             returncode=1, stdout="", stderr="engine: remote status check failed"
         ),
     )
-    resp = client.get("/backend/demo/component-versions?component=engine")
+    resp = client.get("/api/backend/demo/components/engine/versions")
     assert resp.status_code == 502
     assert "remote status check failed" in resp.json()["detail"]
 
@@ -772,7 +796,7 @@ def test_cloud_local_component_versions_returns_parsed_list(
     mock_cl_stream_success: None,
     mocker: MockerFixture,
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     mocker.patch(
         "oqtopus_manager.services.cloud_local.run_oqtopus_subcommand_output",
         return_value=CommandResult(
@@ -780,10 +804,11 @@ def test_cloud_local_component_versions_returns_parsed_list(
         ),
     )
     resp = cloud_local_client.get(
-        "/cloud-local/cl-demo/component-versions?component=cloud"
+        "/api/cloud-local/cl-demo/components/cloud/versions"
     )
     assert resp.status_code == 200
-    assert "v2.0.0" in resp.json()["versions"]
+    versions = [v["version"] for v in resp.json()["versions"]]
+    assert "v2.0.0" in versions
 
 
 def test_cloud_local_component_versions_command_failure_returns_502(
@@ -791,7 +816,7 @@ def test_cloud_local_component_versions_command_failure_returns_502(
     mock_cl_stream_success: None,
     mocker: MockerFixture,
 ) -> None:
-    cloud_local_client.get("/cloud-local/stream?name=cl-demo&template=cloud-local")
+    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     mocker.patch(
         "oqtopus_manager.services.cloud_local.run_oqtopus_subcommand_output",
         return_value=CommandResult(
@@ -799,7 +824,7 @@ def test_cloud_local_component_versions_command_failure_returns_502(
         ),
     )
     resp = cloud_local_client.get(
-        "/cloud-local/cl-demo/component-versions?component=cloud"
+        "/api/cloud-local/cl-demo/components/cloud/versions"
     )
     assert resp.status_code == 502
     assert "remote status check failed" in resp.json()["detail"]
@@ -812,7 +837,7 @@ def test_delete_environment_not_blocked_when_status_check_succeeds_and_stopped(
     mocker: MockerFixture,
 ) -> None:
     """Sanity check: a clean, successful status check with nothing running still allows delete."""
-    client.get("/backend/stream?name=myenv&template=backend")
+    client.get("/api/backend/stream?name=myenv&template=backend")
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
@@ -822,7 +847,7 @@ def test_delete_environment_not_blocked_when_status_check_succeeds_and_stopped(
         ),
     )
 
-    response = client.request("DELETE", "/backend/myenv")
+    response = client.request("DELETE", "/api/backend/myenv")
 
     assert response.status_code == 200
     assert not env_dir.exists()
@@ -837,7 +862,7 @@ def test_delete_environment_blocked_when_status_check_fails(
     """Fail-closed: if the status check itself fails, deletion must be blocked
     rather than silently treated as "no services running".
     """
-    client.get("/backend/stream?name=myenv&template=backend")
+    client.get("/api/backend/stream?name=myenv&template=backend")
     env_dir = tmp_path / "environments" / "myenv"
     env_dir.mkdir(parents=True, exist_ok=True)
     mocker.patch(
@@ -847,7 +872,7 @@ def test_delete_environment_blocked_when_status_check_fails(
         ),
     )
 
-    response = client.request("DELETE", "/backend/myenv")
+    response = client.request("DELETE", "/api/backend/myenv")
 
     assert response.status_code == 409
     assert env_dir.exists()

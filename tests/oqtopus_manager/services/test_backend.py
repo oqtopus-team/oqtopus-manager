@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import pathlib
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
+from pytest_mock import MockerFixture
 
+from oqtopus_manager.models.environment import Environment
+from oqtopus_manager.services import backend as backend_service
 from oqtopus_manager.services.backend import (
     build_stream_args,
     components_installed,
@@ -17,10 +21,145 @@ from oqtopus_manager.services.backend import (
     read_path_from_yaml,
     resolve_installed_config_path,
 )
-from oqtopus_manager.services.exceptions import InvalidArgumentError
+from oqtopus_manager.services.exceptions import (
+    CliNotFoundError,
+    CliTimeoutError,
+    CommandFailedError,
+    InvalidArgumentError,
+)
+from oqtopus_manager.util.cli import CommandResult
 
 # ── read_metadata is exercised via services.environment.read_metadata; see
 # tests/oqtopus_manager/services/test_environment.py for shared coverage.
+
+
+def _cfg(tmp_path: pathlib.Path) -> MagicMock:
+    return MagicMock(
+        oqtopus_cli_timeout_sec=10, default_environment_base_path=tmp_path
+    )
+
+
+def _stub_env(mocker: MockerFixture, tmp_path: pathlib.Path, name: str = "demo") -> None:
+    env = Environment(name=name, template="backend", root_path=tmp_path / name)
+    mocker.patch(
+        "oqtopus_manager.services.backend.get_environment_or_404", return_value=env
+    )
+
+
+# ── get_status / get_device_status / get_info / get_component_versions_detailed ──
+
+
+class TestGetStatus:
+    @pytest.mark.anyio
+    async def test_returns_parsed_status(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(
+                returncode=0, stdout="core: Running (PID 1)\ngateway: Stopped\n", stderr=""
+            ),
+        )
+        data = await backend_service.get_status(_cfg(tmp_path), "demo")
+        assert data.template == "backend"
+        assert data.environment_name == "demo"
+        assert [s.state for s in data.services] == ["running", "stopped"]
+
+    @pytest.mark.anyio
+    async def test_command_failure_raises_command_failed_error(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(returncode=1, stdout="", stderr="boom"),
+        )
+        with pytest.raises(CommandFailedError):
+            await backend_service.get_status(_cfg(tmp_path), "demo")
+
+    @pytest.mark.anyio
+    async def test_cli_not_found_raises_cli_not_found_error(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(returncode=127, stdout="", stderr="not found"),
+        )
+        with pytest.raises(CliNotFoundError):
+            await backend_service.get_status(_cfg(tmp_path), "demo")
+
+    @pytest.mark.anyio
+    async def test_timeout_raises_cli_timeout_error(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(returncode=None, stdout="", stderr="timed out"),
+        )
+        with pytest.raises(CliTimeoutError):
+            await backend_service.get_status(_cfg(tmp_path), "demo")
+
+
+class TestGetDeviceStatus:
+    @pytest.mark.anyio
+    async def test_returns_parsed_device_status(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(returncode=0, stdout="active\n", stderr=""),
+        )
+        data = await backend_service.get_device_status(_cfg(tmp_path), "demo")
+        assert data.device_status == "active"
+
+
+class TestGetInfo:
+    @pytest.mark.anyio
+    async def test_returns_all_known_components(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(
+                returncode=0, stdout="engine_version=v1.0.0\n", stderr=""
+            ),
+        )
+        data = await backend_service.get_info(_cfg(tmp_path), "demo")
+        assert [c.name for c in data.components] == ["engine", "tranqu", "gateway"]
+        assert data.all_installed is False
+
+
+class TestGetComponentVersionsDetailed:
+    @pytest.mark.anyio
+    async def test_invalid_component_raises(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        with pytest.raises(InvalidArgumentError, match="Invalid component"):
+            await backend_service.get_component_versions_detailed(
+                _cfg(tmp_path), "demo", "bogus"
+            )
+
+    @pytest.mark.anyio
+    async def test_returns_versions_data(
+        self, mocker: MockerFixture, tmp_path: pathlib.Path
+    ) -> None:
+        _stub_env(mocker, tmp_path)
+        mocker.patch(
+            "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+            return_value=CommandResult(
+                returncode=0, stdout="gateway:\n* v1.1.14 (installed)\n  v1.1.15\n", stderr=""
+            ),
+        )
+        data = await backend_service.get_component_versions_detailed(
+            _cfg(tmp_path), "demo", "gateway"
+        )
+        assert data.current == "v1.1.14"
+        assert [v.version for v in data.versions] == ["v1.1.14", "v1.1.15"]
 
 
 class TestReadPathFromYaml:
@@ -263,11 +402,13 @@ def _be(cmd: str, **kwargs: object) -> list[str]:
 
 
 class TestBuildStreamArgs:
-    def test_status(self) -> None:
-        assert _be("status") == ["status"]
-
-    def test_info(self) -> None:
-        assert _be("info") == ["info"]
+    def test_status_and_info_are_no_longer_dispatchable(self) -> None:
+        # Read-only cmds moved to JSON endpoints; the dispatcher must reject
+        # them now rather than silently pass through.
+        with pytest.raises(InvalidArgumentError, match="Unknown command"):
+            _be("status")
+        with pytest.raises(InvalidArgumentError, match="Unknown command"):
+            _be("info")
 
     def test_start_valid_service(self) -> None:
         assert _be("start", service="core") == ["start", "core"]
@@ -339,8 +480,10 @@ class TestBuildStreamArgs:
     def test_build(self) -> None:
         assert _be("build") == ["build", "sse-runtime"]
 
-    def test_device_status_show(self) -> None:
-        assert _be("device-status-show") == ["device-status", "show"]
+    def test_device_status_show_is_no_longer_dispatchable(self) -> None:
+        # Moved to GET /api/backend/{name}/device-status.
+        with pytest.raises(InvalidArgumentError, match="Unknown command"):
+            _be("device-status-show")
 
     def test_device_status_set_valid(self) -> None:
         assert _be("device-status-set", status="active") == ["device-status", "active"]

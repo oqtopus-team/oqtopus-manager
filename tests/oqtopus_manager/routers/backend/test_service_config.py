@@ -9,8 +9,10 @@ import uuid
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from pytest_mock import MockerFixture
 
 from oqtopus_manager.main import create_app
+from oqtopus_manager.util.cli import CommandResult
 
 _CONFIG = {
     "server": {
@@ -125,7 +127,7 @@ class TestServiceConfigView:
 
 class TestServiceConfigLock:
     def test_acquire_lock_returns_token(self, client: TestClient) -> None:
-        resp = client.post("/backend/demo/services/engine/config/config/lock")
+        resp = client.post("/api/backend/demo/services/engine/config/config/lock")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert "token" in resp.json()
@@ -134,7 +136,7 @@ class TestServiceConfigLock:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _write_lock(_lock_path(tmp_env, "engine", "config.yaml"))
-        resp = client.post("/backend/demo/services/engine/config/config/lock")
+        resp = client.post("/api/backend/demo/services/engine/config/config/lock")
         assert resp.status_code == 409
 
     def test_unlock_correct_token_succeeds(
@@ -143,7 +145,7 @@ class TestServiceConfigLock:
         lp = _lock_path(tmp_env, "engine", "config.yaml")
         tok = _write_lock(lp)
         resp = client.post(
-            "/backend/demo/services/engine/config/config/unlock",
+            "/api/backend/demo/services/engine/config/config/unlock",
             json={"token": tok},
         )
         assert resp.status_code == 200
@@ -154,7 +156,7 @@ class TestServiceConfigLock:
     ) -> None:
         _write_lock(_lock_path(tmp_env, "engine", "config.yaml"))
         resp = client.post(
-            "/backend/demo/services/engine/config/config/unlock",
+            "/api/backend/demo/services/engine/config/config/unlock",
             json={"token": "wrong"},
         )
         assert resp.status_code == 403
@@ -165,7 +167,7 @@ class TestServiceConfigLock:
         lp = _lock_path(tmp_env, "engine", "config.yaml")
         _write_lock(lp)
         resp = client.post(
-            "/backend/demo/services/engine/config/config/force-unlock"
+            "/api/backend/demo/services/engine/config/config/force-unlock"
         )
         assert resp.status_code == 200
         assert not lp.exists()
@@ -173,13 +175,13 @@ class TestServiceConfigLock:
     def test_invalid_which_returns_400(self, client: TestClient) -> None:
         assert (
             client.post(
-                "/backend/demo/services/engine/config/unknown/lock"
+                "/api/backend/demo/services/engine/config/unknown/lock"
             ).status_code
             == 400
         )
 
     def test_logging_lock_acquire(self, client: TestClient) -> None:
-        resp = client.post("/backend/demo/services/engine/config/logging/lock")
+        resp = client.post("/api/backend/demo/services/engine/config/logging/lock")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
@@ -190,10 +192,10 @@ class TestServiceConfigLock:
 class TestServiceConfigSave:
     def test_saves_content(self, client: TestClient, tmp_env: pathlib.Path) -> None:
         tok = client.post(
-            "/backend/demo/services/engine/config/config/lock"
+            "/api/backend/demo/services/engine/config/config/lock"
         ).json()["token"]
         resp = client.post(
-            "/backend/demo/services/engine/config/config/save",
+            "/api/backend/demo/services/engine/config/config/save",
             json={"token": tok, "content": "new: content\n"},
         )
         assert resp.json()["ok"] is True
@@ -204,7 +206,7 @@ class TestServiceConfigSave:
 
     def test_no_lock_returns_409(self, client: TestClient) -> None:
         resp = client.post(
-            "/backend/demo/services/engine/config/config/save",
+            "/api/backend/demo/services/engine/config/config/save",
             json={"token": "any", "content": ""},
         )
         assert resp.status_code == 409
@@ -218,7 +220,7 @@ class TestTopologyRoutes:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _setup_topology(tmp_env)
-        resp = client.post("/backend/demo/services/gateway/topology-json/force-unlock")
+        resp = client.post("/api/backend/demo/services/gateway/topology-json/force-unlock")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
@@ -228,7 +230,7 @@ class TestTopologyRoutes:
         # No gateway config.yaml → _resolve_topology_path raises 404
         assert (
             client.post(
-                "/backend/demo/services/gateway/topology-json/force-unlock"
+                "/api/backend/demo/services/gateway/topology-json/force-unlock"
             ).status_code
             == 404
         )
@@ -237,7 +239,7 @@ class TestTopologyRoutes:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _setup_topology(tmp_env)
-        resp = client.post("/backend/demo/services/gateway/topology-json/lock")
+        resp = client.post("/api/backend/demo/services/gateway/topology-json/lock")
         assert resp.status_code == 200
         assert "token" in resp.json()
 
@@ -248,7 +250,7 @@ class TestTopologyRoutes:
         lp = topo.parent / f"{topo.name}.lock"
         tok = _write_lock(lp)
         resp = client.post(
-            "/backend/demo/services/gateway/topology-json/unlock", json={"token": tok}
+            "/api/backend/demo/services/gateway/topology-json/unlock", json={"token": tok}
         )
         assert resp.status_code == 200
         assert not lp.exists()
@@ -257,9 +259,9 @@ class TestTopologyRoutes:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         topo = _setup_topology(tmp_env)
-        tok = client.post("/backend/demo/services/gateway/topology-json/lock").json()["token"]
+        tok = client.post("/api/backend/demo/services/gateway/topology-json/lock").json()["token"]
         resp = client.post(
-            "/backend/demo/services/gateway/topology-json/save",
+            "/api/backend/demo/services/gateway/topology-json/save",
             json={"token": tok, "content": '{"qubits": 10}'},
         )
         assert resp.json()["ok"] is True
@@ -269,7 +271,7 @@ class TestTopologyRoutes:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _setup_topology(tmp_env)
-        resp = client.get("/backend/demo/services/gateway/topology-json/download")
+        resp = client.get("/api/backend/demo/services/gateway/topology-json/download")
         assert resp.status_code == 200
         assert b"qubits" in resp.content
 
@@ -280,7 +282,7 @@ class TestTopologyRoutes:
         topo.unlink()
         assert (
             client.get(
-                "/backend/demo/services/gateway/topology-json/download"
+                "/api/backend/demo/services/gateway/topology-json/download"
             ).status_code
             == 404
         )
@@ -290,7 +292,7 @@ class TestTopologyRoutes:
     ) -> None:
         assert (
             client.get(
-                "/backend/demo/services/gateway/topology-json/download"
+                "/api/backend/demo/services/gateway/topology-json/download"
             ).status_code
             == 404
         )
@@ -299,75 +301,81 @@ class TestTopologyRoutes:
 # ── release diff ─────────────────────────────────────────────────────────────
 
 
-def _write_metadata(tmp_env: pathlib.Path, **kwargs: str) -> None:
-    lines = "\n".join(f"{k}={v}" for k, v in kwargs.items())
-    (tmp_env / "environments" / "demo" / ".metadata").write_text(lines, encoding="utf-8")
+def _mock_info(mocker: MockerFixture, **kwargs: str) -> None:
+    """Mock ``oqtopus backend info`` output (release-diff now resolves via info, not .metadata)."""
+    stdout = "\n".join(f"{k}={v}" for k, v in kwargs.items())
+    mocker.patch(
+        "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
+        return_value=CommandResult(returncode=0, stdout=stdout, stderr=""),
+    )
 
 
 class TestServiceConfigReleaseDiff:
     def test_returns_content_when_file_exists(
-        self, client: TestClient, tmp_env: pathlib.Path
+        self, client: TestClient, tmp_env: pathlib.Path, mocker: MockerFixture
     ) -> None:
         install_root = tmp_env / "releases"
         release_cfg = install_root / "engine-v1.0.0" / "core" / "config"
         release_cfg.mkdir(parents=True)
         (release_cfg / "config.yaml").write_text("key: original\n", encoding="utf-8")
-        _write_metadata(
-            tmp_env,
+        _mock_info(
+            mocker,
             install_root=str(install_root),
             engine_version="v1.0.0",
             tranqu_version="v2.0.0",
             gateway_version="v3.0.0",
         )
-        resp = client.get("/backend/demo/services/core/config/config/release-diff")
+        resp = client.get("/api/backend/demo/services/core/config/config/release-diff")
         assert resp.status_code == 200
         data = resp.json()
         assert data["installed_content"] == "key: original\n"
         assert "engine-v1.0.0" in data["installed_path"]
 
     def test_returns_null_when_file_missing(
-        self, client: TestClient, tmp_env: pathlib.Path
+        self, client: TestClient, tmp_env: pathlib.Path, mocker: MockerFixture
     ) -> None:
         install_root = tmp_env / "releases"
         install_root.mkdir()
-        _write_metadata(
-            tmp_env,
+        _mock_info(
+            mocker,
             install_root=str(install_root),
             engine_version="v1.0.0",
             tranqu_version="v2.0.0",
             gateway_version="v3.0.0",
         )
-        resp = client.get("/backend/demo/services/core/config/config/release-diff")
+        resp = client.get("/api/backend/demo/services/core/config/config/release-diff")
         assert resp.status_code == 200
         data = resp.json()
         assert data["installed_content"] is None
         assert data["installed_path"] is not None
 
     def test_returns_null_when_no_install_root(
-        self, client: TestClient, tmp_env: pathlib.Path
+        self, client: TestClient, tmp_env: pathlib.Path, mocker: MockerFixture
     ) -> None:
-        _write_metadata(tmp_env, engine_version="v1.0.0")
-        resp = client.get("/backend/demo/services/core/config/config/release-diff")
+        _mock_info(mocker, engine_version="v1.0.0")
+        resp = client.get("/api/backend/demo/services/core/config/config/release-diff")
         assert resp.status_code == 200
         data = resp.json()
         assert data["installed_content"] is None
         assert data["installed_path"] is None
 
     def test_branch_version_resolves_to_env_root(
-        self, client: TestClient, tmp_env: pathlib.Path
+        self, client: TestClient, tmp_env: pathlib.Path, mocker: MockerFixture
     ) -> None:
         branch_cfg = tmp_env / "environments" / "demo" / "engine" / "core" / "config"
         branch_cfg.mkdir(parents=True)
         (branch_cfg / "config.yaml").write_text("branch: content\n", encoding="utf-8")
-        _write_metadata(tmp_env, engine_version="branch:main", tranqu_version="v2.0.0", gateway_version="v3.0.0")
-        resp = client.get("/backend/demo/services/core/config/config/release-diff")
+        _mock_info(
+            mocker, engine_version="branch:main", tranqu_version="v2.0.0", gateway_version="v3.0.0"
+        )
+        resp = client.get("/api/backend/demo/services/core/config/config/release-diff")
         assert resp.status_code == 200
         assert resp.json()["installed_content"] == "branch: content\n"
 
     def test_invalid_which_returns_400(self, client: TestClient) -> None:
         assert (
             client.get(
-                "/backend/demo/services/core/config/unknown/release-diff"
+                "/api/backend/demo/services/core/config/unknown/release-diff"
             ).status_code
             == 400
         )
@@ -375,21 +383,21 @@ class TestServiceConfigReleaseDiff:
 
 class TestTopologyReleaseDiff:
     def test_returns_content_when_file_exists(
-        self, client: TestClient, tmp_env: pathlib.Path
+        self, client: TestClient, tmp_env: pathlib.Path, mocker: MockerFixture
     ) -> None:
         _setup_topology(tmp_env)
         install_root = tmp_env / "releases"
         release_cfg = install_root / "gateway-v3.0.0" / "config" / "example"
         release_cfg.mkdir(parents=True)
         (release_cfg / "topology.json").write_text('{"original": true}', encoding="utf-8")
-        _write_metadata(
-            tmp_env,
+        _mock_info(
+            mocker,
             install_root=str(install_root),
             engine_version="v1.0.0",
             tranqu_version="v2.0.0",
             gateway_version="v3.0.0",
         )
-        resp = client.get("/backend/demo/services/gateway/topology-json/release-diff")
+        resp = client.get("/api/backend/demo/services/gateway/topology-json/release-diff")
         assert resp.status_code == 200
         data = resp.json()
         assert data["installed_content"] == '{"original": true}'
@@ -398,7 +406,7 @@ class TestTopologyReleaseDiff:
     def test_no_topology_configured_returns_404(self, client: TestClient) -> None:
         assert (
             client.get(
-                "/backend/demo/services/gateway/topology-json/release-diff"
+                "/api/backend/demo/services/gateway/topology-json/release-diff"
             ).status_code
             == 404
         )

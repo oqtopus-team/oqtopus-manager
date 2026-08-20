@@ -160,7 +160,7 @@
   var cfgEditor = makeEditor({
     rawContent: {{ config_content | tojson }},
     lockTimeoutSec: {{ lock_timeout_sec }},
-    baseUrl: '/backend/' + envName + '/services/' + serviceName + '/config/config',
+    baseUrl: '/api/backend/' + envName + '/services/' + serviceName + '/config/config',
     detailsId: 'details-cfg',
     viewId: 'cfg-view',    editId: 'cfg-edit',    diffId: 'cfg-diff',
     editPreId: 'cfg-edit-pre', editTaId: 'cfg-edit-ta', diffOutId: 'cfg-diff-out',
@@ -181,7 +181,7 @@
   var logEditor = makeEditor({
     rawContent: {{ logging_content | tojson }},
     lockTimeoutSec: {{ lock_timeout_sec }},
-    baseUrl: '/backend/' + envName + '/services/' + serviceName + '/config/logging',
+    baseUrl: '/api/backend/' + envName + '/services/' + serviceName + '/config/logging',
     detailsId: 'details-log',
     viewId: 'log-view',    editId: 'log-edit',    diffId: 'log-diff',
     editPreId: 'log-edit-pre', editTaId: 'log-edit-ta', diffOutId: 'log-diff-out',
@@ -203,7 +203,7 @@
     rawContent: {{ topology_content | tojson }},
     lockTimeoutSec: {{ lock_timeout_sec }},
     language: 'json',
-    baseUrl: '/backend/' + envName + '/services/gateway/topology-json',
+    baseUrl: '/api/backend/' + envName + '/services/gateway/topology-json',
     detailsId: 'details-topo',
     viewId: 'topo-view',    editId: 'topo-edit',    diffId: 'topo-diff',
     editPreId: 'topo-edit-pre', editTaId: 'topo-edit-ta', diffOutId: 'topo-diff-out',

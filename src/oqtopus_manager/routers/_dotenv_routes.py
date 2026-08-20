@@ -31,28 +31,31 @@ if TYPE_CHECKING:
 
 
 def make_dotenv_router(  # noqa: C901, PLR0915
-    url_prefix: str,
+    html_url_prefix: str,
+    api_url_prefix: str,
     tags: Sequence[str],
     *,
     release_diff_raw_url: str,
     release_diff_display_url: str,
-) -> APIRouter:
-    """Return an APIRouter with all .env editor routes wired to ``url_prefix``.
+) -> tuple[APIRouter, APIRouter]:
+    """Return the HTML and /api routers for the .env editor.
 
     Args:
-        url_prefix: URL prefix for the router (e.g. "/backend").
-        tags: OpenAPI tags for the router.
+        html_url_prefix: URL prefix for the HTML page (e.g. "/backend").
+        api_url_prefix: URL prefix for the JSON/download endpoints
+            (e.g. "/api/backend").
+        tags: OpenAPI tags for both routers.
         release_diff_raw_url: Raw GitHub URL of the upstream .env template.
         release_diff_display_url: Browser-friendly GitHub URL shown in the diff panel.
 
     Returns:
-        APIRouter with force-unlock, lock, unlock, save, download, release-diff,
-        and view routes.
+        (router, api_router): HTML page router and JSON/download router.
 
     """
-    router = APIRouter(prefix=url_prefix, tags=tags)  # type: ignore[arg-type]
+    router = APIRouter(prefix=html_url_prefix, tags=tags)  # type: ignore[arg-type]
+    api_router = APIRouter(prefix=api_url_prefix, tags=tags)  # type: ignore[arg-type]
 
-    @router.post(
+    @api_router.post(
         "/{name}/dotenv/force-unlock",
         dependencies=[require_permission("environment.config.update")],
     )
@@ -66,7 +69,7 @@ def make_dotenv_router(  # noqa: C901, PLR0915
         env_service.force_unlock_file(resolved / "config" / ".env.lock")
         return JSONResponse({"ok": True})
 
-    @router.post(
+    @api_router.post(
         "/{name}/dotenv/lock",
         dependencies=[require_permission("environment.config.update")],
     )
@@ -88,7 +91,7 @@ def make_dotenv_router(  # noqa: C901, PLR0915
             "acquired_ts": lock.acquired_ts,
         })
 
-    @router.post(
+    @api_router.post(
         "/{name}/dotenv/unlock",
         dependencies=[require_permission("environment.config.update")],
     )
@@ -110,7 +113,7 @@ def make_dotenv_router(  # noqa: C901, PLR0915
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return JSONResponse({"ok": True})
 
-    @router.post(
+    @api_router.post(
         "/{name}/dotenv/save",
         dependencies=[require_permission("environment.config.update")],
     )
@@ -134,7 +137,7 @@ def make_dotenv_router(  # noqa: C901, PLR0915
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return JSONResponse({"ok": True})
 
-    @router.get(
+    @api_router.get(
         "/{name}/dotenv/download",
         dependencies=[require_permission("environment.config.get")],
     )
@@ -153,7 +156,7 @@ def make_dotenv_router(  # noqa: C901, PLR0915
             raise HTTPException(status_code=404, detail="config/.env not found.")
         return FileResponse(path=dotenv_path, filename=".env", media_type="text/plain")
 
-    @router.get(
+    @api_router.get(
         "/{name}/dotenv/release-diff",
         dependencies=[require_permission("environment.config.get")],
     )
@@ -185,7 +188,8 @@ def make_dotenv_router(  # noqa: C901, PLR0915
             "environments/dotenv.html",
             {
                 "env": env,
-                "url_prefix": url_prefix,
+                "url_prefix": html_url_prefix,
+                "api_url_prefix": api_url_prefix,
                 "dotenv_path": dotenv_path,
                 "dotenv_content": (
                     dotenv_path.read_text(encoding="utf-8")
@@ -199,4 +203,4 @@ def make_dotenv_router(  # noqa: C901, PLR0915
             },
         )
 
-    return router
+    return router, api_router

@@ -10,20 +10,32 @@ import yaml
 from oqtopus_manager.services.environment import (
     check_lock,
     get_environment_or_404,
-    read_metadata,
+    raise_for_command_result,
 )
 from oqtopus_manager.services.exceptions import (
-    CommandFailedError,
     InvalidArgumentError,
     TopologyNotConfiguredError,
 )
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
-from oqtopus_manager.util.parse import parse_versions
+from oqtopus_manager.util.parse import (
+    parse_device_status,
+    parse_info,
+    parse_status,
+    parse_versions_detailed,
+)
 
 if TYPE_CHECKING:
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.models.environment import Environment
+    from oqtopus_manager.util.cli import CommandResult
+    from oqtopus_manager.util.parse import (
+        DeviceStatusData,
+        EnvironmentData,
+        StatusData,
+        VersionsData,
+    )
 
+_SUBCOMMAND = "backend"
 _VALID_SERVICES = frozenset({
     "all",
     "core",
@@ -34,32 +46,32 @@ _VALID_SERVICES = frozenset({
     "tranqu",
     "gateway",
 })
-_VALID_COMPONENTS = frozenset({"engine", "tranqu", "gateway"})
+# Single source of truth for the component list; this was previously
+# duplicated across this module, routers/backend/detail.py, and the
+# detail-page template.
+COMPONENTS: tuple[str, ...] = ("engine", "tranqu", "gateway")
+_VALID_COMPONENTS = frozenset(COMPONENTS)
 _VALID_STATUSES = frozenset({"active", "inactive", "maintenance"})
 
 
 def build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
     """Build template context for the backend list page.
 
+    Deliberately excludes any per-environment CLI-derived data (status,
+    all_installed): the list must render immediately from
+    ``environments.yaml`` alone, without spawning a subprocess per
+    environment. The client fetches
+    ``GET /api/backend?include_status=true`` after load to fill in the rest.
+
     Returns:
-        Dict with env_items (list of dicts with env and all_installed) and base_path.
+        Dict with env_items and base_path for the list template.
 
     """
-    env_items = []
-    for env in environments:
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        meta = read_metadata(resolved)
-        # All three service versions must be present for the env to be fully installed
-        all_installed = bool(
-            meta.get("engine_version")
-            and meta.get("tranqu_version")
-            and meta.get("gateway_version")
-        )
-        env_items.append({"env": env, "all_installed": all_installed})
     return {
-        "env_items": env_items,
+        "env_items": [{"env": env} for env in environments],
         "base_path": cfg.default_environment_base_path,
         "url_prefix": "/backend",
+        "api_url_prefix": "/api/backend",
         "page_title": "Backend",
         "page_description": "Manage your OQTOPUS backend environments.",
         "has_device_status": True,
@@ -77,6 +89,12 @@ def build_stream_args(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917
 ) -> list[str]:
     """Translate validated query params into oqtopus backend argv.
 
+    ``status``/``info``/``device-status-show`` are deliberately not handled
+    here: the UI reads them from the JSON endpoints
+    (GET .../status, .../device-status, .../{name}) instead of this
+    stream dispatcher. ``versions`` stays -- it still backs the console's
+    raw-output display alongside the JSON versions endpoint.
+
     Returns:
         List of string arguments to pass to the oqtopus backend CLI.
 
@@ -85,10 +103,6 @@ def build_stream_args(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917
             command is provided.
 
     """
-    if cmd == "status":
-        return ["status"]
-    if cmd == "info":
-        return ["info"]
     if cmd in {"start", "stop", "restart"}:
         if service not in _VALID_SERVICES:
             msg = f"Invalid service '{service}'"
@@ -128,8 +142,6 @@ def build_stream_args(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917
         return ["uninstall", component, version]
     if cmd == "build":
         return ["build", "sse-runtime"]
-    if cmd == "device-status-show":
-        return ["device-status", "show"]
     if cmd == "device-status-set":
         if status not in _VALID_STATUSES:
             msg = f"Invalid status '{status}'"
@@ -139,32 +151,109 @@ def build_stream_args(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917
     raise InvalidArgumentError(msg)
 
 
-async def get_component_versions(
-    cfg: AppConfig, name: str, component: str
-) -> list[str]:
-    """Run ``oqtopus backend versions <component>`` and parse the version list.
+async def _run(
+    cfg: AppConfig, name: str, args: list[str]
+) -> tuple[Environment, CommandResult]:
+    """Resolve *name* and run ``oqtopus backend <args>``, raising on failure.
 
     Returns:
-        Matched version strings and branch tokens, in output order.
+        The (Environment, CommandResult) pair for the caller to parse.
+
+    """
+    env = get_environment_or_404(name, cfg)
+    cwd = env.resolved_root_path(cfg.default_environment_base_path)
+    result = await run_oqtopus_subcommand_output(
+        _SUBCOMMAND, args, cwd, cfg.oqtopus_cli_timeout_sec
+    )
+    raise_for_command_result(result)
+    return env, result
+
+
+async def get_status(cfg: AppConfig, name: str) -> StatusData:
+    """Run ``oqtopus backend status`` and parse it into StatusData.
+
+    Returns:
+        StatusData for the ``GET /api/backend/{name}/status`` response.
+
+    """
+    _, result = await _run(cfg, name, ["status"])
+    return parse_status(result, template="backend", environment_name=name)
+
+
+async def get_device_status(cfg: AppConfig, name: str) -> DeviceStatusData:
+    """Run ``oqtopus backend device-status show`` and parse it.
+
+    Returns:
+        DeviceStatusData for the ``GET /api/backend/{name}/device-status`` response.
+
+    """
+    _, result = await _run(cfg, name, ["device-status", "show"])
+    return parse_device_status(result, template="backend", environment_name=name)
+
+
+async def get_info(cfg: AppConfig, name: str) -> EnvironmentData:
+    """Run ``oqtopus backend info`` and parse it into EnvironmentData.
+
+    Returns:
+        EnvironmentData for the ``GET /api/backend/{name}`` response.
+
+    """
+    _, result = await _run(cfg, name, ["info"])
+    return parse_info(result, template="backend", components=COMPONENTS)
+
+
+async def get_component_versions_detailed(
+    cfg: AppConfig, name: str, component: str
+) -> VersionsData:
+    """Run ``oqtopus backend versions <component>`` and parse it into VersionsData.
+
+    Returns:
+        VersionsData for the components/{component}/versions response.
 
     Raises:
         InvalidArgumentError: If the component is not recognized.
-        CommandFailedError: If the CLI invocation fails.
 
     """
     if component not in _VALID_COMPONENTS:
         msg = f"Invalid component '{component}'"
         raise InvalidArgumentError(msg)
+    _, result = await _run(cfg, name, ["versions", component])
+    return parse_versions_detailed(result, template="backend", component=component)
 
-    env = get_environment_or_404(name, cfg)
-    cwd = env.resolved_root_path(cfg.default_environment_base_path)
-    result = await run_oqtopus_subcommand_output(
-        "backend", ["versions", component], cwd
-    )
-    if not result.ok:
-        msg = result.stderr.strip() or f"oqtopus backend versions {component} failed"
-        raise CommandFailedError(msg)
-    return parse_versions(result)
+
+def _info_to_meta(info: EnvironmentData) -> dict[str, str]:
+    """Reshape EnvironmentData into the dict resolve_installed_config_path expects.
+
+    Bridges the ``info()`` call to the pre-existing path-resolution logic,
+    which still keys off the old ``.metadata`` shape, without duplicating
+    that logic.
+
+    Returns:
+        Dict with ``install_root`` and ``{component}_version`` keys.
+
+    """
+    meta: dict[str, str] = {}
+    if info.install_root:
+        meta["install_root"] = info.install_root
+    for component in info.components:
+        if component.version:
+            meta[f"{component.name}_version"] = component.version
+    return meta
+
+
+async def resolve_installed_config_path_via_info(
+    cfg: AppConfig, name: str, service: str, filename: str, env_root: pathlib.Path
+) -> pathlib.Path | None:
+    """Resolve an installed config path using ``info`` instead of ``.metadata``.
+
+    Returns:
+        Resolved Path, or None when the service is unknown or install_root
+        is absent for a release version.
+
+    """
+    info = await get_info(cfg, name)
+    meta = _info_to_meta(info)
+    return resolve_installed_config_path(service, filename, meta, env_root)
 
 
 def _extract_path_from_yaml(

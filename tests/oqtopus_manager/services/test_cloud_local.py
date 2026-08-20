@@ -80,11 +80,13 @@ class TestBuildComponentArgs:
 
 
 class TestCloudLocalBuildStreamArgs:
-    def test_status(self) -> None:
-        assert build_stream_args("status", "all", "cloud", "", False) == ["status"]
-
-    def test_info(self) -> None:
-        assert build_stream_args("info", "all", "cloud", "", False) == ["info"]
+    def test_status_and_info_are_no_longer_dispatchable(self) -> None:
+        # Read-only cmds moved to JSON endpoints; the dispatcher must reject
+        # them now rather than silently pass through.
+        with pytest.raises(InvalidArgumentError, match="Unknown command"):
+            build_stream_args("status", "all", "cloud", "", False)
+        with pytest.raises(InvalidArgumentError, match="Unknown command"):
+            build_stream_args("info", "all", "cloud", "", False)
 
     def test_start_delegates_to_service_args(self) -> None:
         assert build_stream_args("start", "db", "cloud", "", False) == ["start", "db"]

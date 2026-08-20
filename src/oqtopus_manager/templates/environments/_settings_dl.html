@@ -1,27 +1,26 @@
 <dl id="settings-dl" class="divide-y divide-gray-200">
   <div class="flex items-center px-5 py-2">
     <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">environment_root</dt>
-    <dd class="text-sm text-gray-800 font-mono">{{ meta.environment_root if meta.environment_root else resolved_root_path }}</dd>
+    <dd class="text-sm text-gray-800 font-mono">{{ info.environment_root if info.environment_root else resolved_root_path }}</dd>
   </div>
   <div class="flex items-center px-5 py-2">
     <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">install_root</dt>
-    <dd class="text-sm text-gray-800 font-mono">{{ meta.install_root if meta.install_root else '—' }}</dd>
+    <dd class="text-sm text-gray-800 font-mono">{{ info.install_root if info.install_root else '—' }}</dd>
   </div>
   <div class="flex items-center px-5 py-2">
     <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">created_at</dt>
-    <dd class="text-sm text-gray-800">{{ meta.created_at if meta.created_at else '—' }}</dd>
+    <dd class="text-sm text-gray-800">{{ info.created_at if info.created_at else '—' }}</dd>
   </div>
-  {% set _env_root = meta.environment_root if meta.environment_root else resolved_root_path %}
-  {% for key in version_keys %}
-  {% set comp = key | replace('_version', '') %}
-  <div class="flex items-center px-5 py-2" data-ver="{{ key }}">
-    <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">{{ key }}</dt>
+  {% set _env_root = info.environment_root if info.environment_root else resolved_root_path %}
+  {% for c in info.components %}
+  <div class="flex items-center px-5 py-2" data-ver="{{ c.name }}_version">
+    <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">{{ c.name }}_version</dt>
     <dd class="text-sm">
-      {% if meta[key] %}
-        {% if meta[key].startswith('branch:') %}
-          <span class="font-mono text-gray-800" data-installed="true">{{ meta[key] }} (installed at {{ _env_root }}/{{ comp }})</span>
+      {% if c.version %}
+        {% if c.kind == 'branch' %}
+          <span class="font-mono text-gray-800" data-installed="true">{{ c.version }} (installed at {{ _env_root }}/{{ c.name }})</span>
         {% else %}
-          <span class="font-mono text-gray-800" data-installed="true">{{ meta[key] }}</span>
+          <span class="font-mono text-gray-800" data-installed="true">{{ c.version }}</span>
         {% endif %}
       {% else %}
         <span class="text-red-500">not installed</span>

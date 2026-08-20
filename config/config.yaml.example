@@ -10,6 +10,7 @@ behavior:
   log_tail_lines: 100
   log_buffer_lines: 1000
   file_edit_lock_timeout_sec: 600
+  oqtopus_cli_timeout_sec: 10
 
 # Appearance settings: app branding and sidebar links
 appearance:

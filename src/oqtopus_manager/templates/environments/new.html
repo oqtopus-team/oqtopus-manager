@@ -187,7 +187,7 @@
     consoleArea.classList.add("hidden");
   };
 
-  function startStream(name, template, rootPath, urlPrefix) {
+  function startStream(name, template, rootPath, apiUrlPrefix, htmlUrlPrefix) {
     if (currentEs) currentEs.close();
 
     consoleArea.classList.remove("hidden");
@@ -199,7 +199,7 @@
     consoleArea.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
     const params = new URLSearchParams({ name, template, root_path: rootPath });
-    currentEs = new EventSource(urlPrefix + "/stream?" + params.toString());
+    currentEs = new EventSource(apiUrlPrefix + "/stream?" + params.toString());
 
     currentEs.onmessage = function (e) {
       appendLine(e.data);
@@ -215,7 +215,7 @@
         consoleStatus.textContent = "Done";
         consoleStatus.className = "text-xs font-semibold text-green-600";
         consoleFooter.classList.remove("hidden");
-        consoleMessage.innerHTML = 'Completed successfully. <a href="' + urlPrefix + '/' + encodeURIComponent(name) + '" class="btn btn-primary btn-outline btn-sm ml-2">'
+        consoleMessage.innerHTML = 'Completed successfully. <a href="' + htmlUrlPrefix + '/' + encodeURIComponent(name) + '" class="btn btn-primary btn-outline btn-sm ml-2">'
           + 'Open ' + name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
           + '</a>';
         consoleMessage.className = "text-sm text-green-700 flex items-center";
@@ -250,8 +250,9 @@
 
     const formData = new FormData(form);
     const tmpl = formData.get("template");
-    const urlPrefix = "/" + tmpl;
-    const resp = await fetch(urlPrefix, { method: "POST", body: formData });
+    const apiUrlPrefix = "/api/" + tmpl;
+    const htmlUrlPrefix = "/" + tmpl;
+    const resp = await fetch(apiUrlPrefix, { method: "POST", body: formData });
     const json = await resp.json();
 
     if (!json.ok) {
@@ -264,7 +265,8 @@
       formData.get("name"),
       tmpl,
       formData.get("root_path") || "",
-      urlPrefix
+      apiUrlPrefix,
+      htmlUrlPrefix
     );
   });
 })();

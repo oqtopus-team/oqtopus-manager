@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.metadata
+import logging
 import pathlib
 
 import uvicorn
@@ -16,14 +17,23 @@ from oqtopus_manager.config import AppConfig
 from oqtopus_manager.routers import app_settings, browse, debug, me, meta
 from oqtopus_manager.routers import backend as backend_pkg
 from oqtopus_manager.routers import cloud_local as cloud_local_pkg
+from oqtopus_manager.services.environment import check_reserved_environment_names
+
+logger = logging.getLogger(__name__)
 
 # Jinja2 templates directory bundled with the package
 _TEMPLATES_DIR = pathlib.Path(__file__).parent / "templates"
 
-# Maps each template type to its list of routers
+# Maps each template type to its list of HTML-page routers (kept at
+# /{template}) and its list of JSON/Server-Sent Events/download routers
+# (under /api/{template}).
 _TEMPLATE_ROUTERS = {
     "backend": backend_pkg.routers,
     "cloud-local": cloud_local_pkg.routers,
+}
+_TEMPLATE_API_ROUTERS = {
+    "backend": backend_pkg.api_routers,
+    "cloud-local": cloud_local_pkg.api_routers,
 }
 
 
@@ -48,6 +58,15 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
     if unknown:
         msg = f"Unsupported environment_templates: {sorted(unknown)}"
         raise ValueError(msg)
+
+    reserved_collisions = check_reserved_environment_names(cfg)
+    if reserved_collisions:
+        logger.warning(
+            "Environment name(s) %s collide with a reserved route segment "
+            "and are unreachable through the UI. Rename them to restore "
+            "access.",
+            reserved_collisions,
+        )
 
     # Initialize FastAPI and attach config/templates to app state
     app = FastAPI(
@@ -78,9 +97,12 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
     for tmpl in cfg.environment_templates:
         for router in _TEMPLATE_ROUTERS.get(tmpl, []):
             app.include_router(router)
+        for router in _TEMPLATE_API_ROUTERS.get(tmpl, []):
+            app.include_router(router)
     app.include_router(meta.router)
     app.include_router(browse.router)
     app.include_router(app_settings.router)
+    app.include_router(app_settings.api_router)
     if cfg.auth.provider != "none":
         app.include_router(me.router)
     if cfg.enable_debug_endpoint:

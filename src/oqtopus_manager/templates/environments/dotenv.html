@@ -104,7 +104,7 @@
         Preview &amp; Save
       </button>
       <button id="cancel-btn" onclick="cancelEdit()" class="hidden btn btn-ghost btn-sm text-gray-500">Cancel</button>
-      <a id="download-btn" href="{{ url_prefix }}/{{ env.name }}/dotenv/download" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download .env">
+      <a id="download-btn" href="{{ api_url_prefix }}/{{ env.name }}/dotenv/download" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download .env">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
@@ -220,7 +220,7 @@
 
   var rawContent = {{ dotenv_content | tojson }};
   var envName = {{ env.name | tojson }};
-  var urlPrefix = {{ url_prefix | tojson }};
+  var urlPrefix = {{ api_url_prefix | tojson }};
   var lockTimeoutSec = {{ lock_timeout_sec }};
 
   function esc(s) {
