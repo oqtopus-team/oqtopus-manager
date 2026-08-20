@@ -69,6 +69,42 @@ class CommandFailedError(ServiceError):
 
     status_code = 502
 
+    def __init__(self, message: str, *, returncode: int | None = None) -> None:
+        self.returncode = returncode
+        super().__init__(message)
+
+
+class CliNotFoundError(CommandFailedError):
+    """The ``oqtopus`` executable is not on PATH (returncode 127)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "oqtopus command not found. Please install oqtopus-cli first.",
+            returncode=127,
+        )
+
+
+class CliTimeoutError(ServiceError):
+    """An ``oqtopus`` CLI invocation exceeded the configured timeout."""
+
+    status_code = 504
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class ReservedEnvironmentNameError(ServiceError):
+    """The requested environment name collides with a reserved route segment."""
+
+    status_code = 422
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(
+            f"Environment name '{name}' is reserved and cannot be used "
+            "(collides with a fixed route segment)."
+        )
+
 
 class TopologyNotConfiguredError(ServiceError):
     """``device_topology_json_path`` is not configured in the gateway config."""

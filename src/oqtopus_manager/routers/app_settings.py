@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from oqtopus_manager.config import AppConfig
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+api_router = APIRouter(prefix="/api/settings", tags=["settings-api"])
 
 
 async def _run_quick(argv: list[str]) -> str:
@@ -143,7 +144,7 @@ async def settings_page(request: Request) -> HTMLResponse:
     )
 
 
-@router.post(
+@api_router.post(
     "/{which}/force-unlock",
     dependencies=[require_permission("app_settings.update")],
 )
@@ -160,7 +161,7 @@ async def force_unlock_settings(request: Request, which: str) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{which}/lock",
     dependencies=[require_permission("app_settings.update")],
 )
@@ -185,7 +186,7 @@ async def acquire_settings_lock(request: Request, which: str) -> JSONResponse:
     })
 
 
-@router.post(
+@api_router.post(
     "/{which}/unlock",
     dependencies=[require_permission("app_settings.update")],
 )
@@ -210,7 +211,7 @@ async def release_settings_lock(
     return JSONResponse({"ok": True})
 
 
-@router.post(
+@api_router.post(
     "/{which}/save",
     dependencies=[require_permission("app_settings.update")],
 )

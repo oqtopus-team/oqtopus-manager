@@ -20,21 +20,30 @@ from oqtopus_manager.util.cli import stream_log_tail
 
 
 def make_log_router(
-    url_prefix: str,
+    html_url_prefix: str,
+    api_url_prefix: str,
     tags: Sequence[str],
     get_log_file: Callable[[pathlib.Path, str], pathlib.Path | None],
-) -> APIRouter:
-    """Return an APIRouter with all service log routes wired to ``url_prefix``.
+) -> tuple[APIRouter, APIRouter]:
+    """Return the HTML and /api routers for the service log viewer.
 
     ``get_log_file`` resolves the log path from the environment root and service
     name; the implementation differs per template type (backend reads from YAML,
     cloud-local uses a fixed path).
 
+    Args:
+        html_url_prefix: URL prefix for the HTML page (e.g. "/backend").
+        api_url_prefix: URL prefix for the stream/download endpoints
+            (e.g. "/api/backend").
+        tags: OpenAPI tags for both routers.
+        get_log_file: Resolves a service's log file path.
+
     Returns:
-        APIRouter with service log view, stream, and download routes.
+        (router, api_router): HTML page router and stream/download router.
 
     """
-    router = APIRouter(prefix=url_prefix, tags=tags)  # type: ignore[arg-type]
+    router = APIRouter(prefix=html_url_prefix, tags=tags)  # type: ignore[arg-type]
+    api_router = APIRouter(prefix=api_url_prefix, tags=tags)  # type: ignore[arg-type]
 
     @router.get(
         "/{name}/services/{service}/log",
@@ -55,13 +64,14 @@ def make_log_router(
             {
                 "env": env,
                 "service": service,
-                "url_prefix": url_prefix,
+                "url_prefix": html_url_prefix,
+                "api_url_prefix": api_url_prefix,
                 "log_file": log_file,
                 "buffer_lines": cfg.log_buffer_lines,
             },
         )
 
-    @router.get(
+    @api_router.get(
         "/{name}/services/{service}/log/stream",
         dependencies=[require_permission("environment.log.get")],
     )
@@ -82,7 +92,7 @@ def make_log_router(
             media_type="text/event-stream",
         )
 
-    @router.get(
+    @api_router.get(
         "/{name}/services/{service}/log/download",
         dependencies=[require_permission("environment.log.get")],
     )
@@ -104,4 +114,4 @@ def make_log_router(
             media_type="text/plain",
         )
 
-    return router
+    return router, api_router

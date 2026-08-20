@@ -113,9 +113,10 @@
         </div>
       </div>
       <div class="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
+        {% set _engine_version = info.components | selectattr('name', 'equalto', 'engine') | map(attribute='version') | first %}
         <button id="btn-build" onclick="runCmd('build', {}, 'build sse-runtime', this)"
                 class="btn btn-sm btn-outline"
-                {% if not meta.get('engine_version') %}disabled{% endif %}>Build SSE Runtime</button>
+                {% if not _engine_version %}disabled{% endif %}>Build SSE Runtime</button>
       </div>
     </div>
   </details>
@@ -231,7 +232,7 @@
     <div class="flex justify-end gap-3">
       <button onclick="document.getElementById('delete-modal').classList.add('hidden')" class="btn btn-sm btn-outline">Cancel</button>
       <button
-        onclick="confirmDelete(this, '/backend/' + envName)"
+        onclick="confirmDelete(this, '/api/backend/' + envName)"
         class="btn btn-sm gap-1.5" style="background:#fff; border:1px solid #dc2626; color:#dc2626;">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
@@ -394,11 +395,11 @@ var envName = {{ env.name | tojson }};
 
   window.runCmd = function (cmd, extra, label, btn) {
     var params = new URLSearchParams(Object.assign({ cmd: cmd }, extra));
-    startStream('/backend/' + envName + '/stream?' + params, label, btn);
+    startStream('/api/backend/' + envName + '/stream?' + params, label, btn);
   };
   window.runServiceCmdFor = function (action, svc, btn) {
     var params = new URLSearchParams({ cmd: action, service: svc });
-    startStream('/backend/' + envName + '/stream?' + params, action + ' ' + svc, btn,
+    startStream('/api/backend/' + envName + '/stream?' + params, action + ' ' + svc, btn,
       function () { window.fetchStatus(null); });
   };
   window.runComponentCmd = function (action, btn) {
@@ -413,7 +414,7 @@ var envName = {{ env.name | tojson }};
     var needsRefresh = (action === 'install' || action === 'update' || action === 'uninstall');
     var compBtnIds = ['btn-versions', 'btn-install', 'btn-uninstall'];
     compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
-    startStream('/backend/' + envName + '/stream?' + params,
+    startStream('/api/backend/' + envName + '/stream?' + params,
       label, btn,
       needsRefresh ? refreshSettings : null,
       function () {
@@ -422,20 +423,24 @@ var envName = {{ env.name | tojson }};
       });
   };
 
-  var _VALID_COMP = new Set(['engine', 'tranqu', 'gateway']);
+  var _VALID_COMP = new Set({{ components | tojson }});
 
   window.fetchVersions = function (btn) {
     var comp = document.getElementById('comp').value;
     if (!_VALID_COMP.has(comp)) return;
     var params = new URLSearchParams({ cmd: 'versions', component: comp });
-    startStream('/backend/' + envName + '/stream?' + params, 'versions ' + comp, btn);
-    fetch('/backend/' + envName + '/component-versions?component=' + encodeURIComponent(comp))
+    startStream('/api/backend/' + envName + '/stream?' + params, 'versions ' + comp, btn);
+    fetch('/api/backend/' + envName + '/components/' + encodeURIComponent(comp) + '/versions')
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var wrap = document.getElementById('ver-wrap');
-        var branches = data.versions.filter(function (v) { return v.startsWith('branch:'); });
-        var releases = data.versions.filter(function (v) { return !v.startsWith('branch:'); });
-        var toOpt = function (v) { return '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>'; };
+        // Preserve the CLI's order as returned: don't re-sort.
+        var branches = data.versions.filter(function (v) { return v.kind === 'branch'; });
+        var releases = data.versions.filter(function (v) { return v.kind !== 'branch'; });
+        var toOpt = function (v) {
+          var label = v.version + (v.installed ? ' (installed)' : '');
+          return '<option value="' + escapeHtml(v.version) + '">' + escapeHtml(label) + '</option>';
+        };
         var opts = branches.map(toOpt).join('') + '<option value="">latest</option>' + releases.map(toOpt).join('');
         wrap.innerHTML = '<select id="ver" class="select select-bordered select-sm w-40">' + opts + '</select>';
       })
@@ -457,37 +462,33 @@ var envName = {{ env.name | tojson }};
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function renderStatusTable(lines) {
+  function renderStatusTable(services) {
     var wrap = document.getElementById('status-table-wrap');
     if (!wrap) return;
-    var rows = [];
-    lines.forEach(function (line) {
-      var idx = line.indexOf(':');
-      if (idx > 0) rows.push({ svc: line.slice(0, idx).trim(), st: line.slice(idx + 1).trim() });
-    });
-    if (!rows.length) { wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-gray-400">No data.</td></tr>'; return; }
-    var allStopped = rows.every(function (r) { return !r.st.toLowerCase().startsWith('running'); });
+    if (!services.length) { wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-gray-400">No data.</td></tr>'; return; }
+    var allStopped = services.every(function (s) { return s.state !== 'running'; });
     ['btn-stop-all', 'btn-restart-all'].forEach(function (id) {
       var b = document.getElementById(id);
       if (b) { b.disabled = allStopped; b.classList.toggle('btn-disabled', allStopped); }
     });
     var html = '';
-    rows.forEach(function (row) {
-      var running = row.st.toLowerCase().startsWith('running');
+    services.forEach(function (svc) {
+      var running = svc.state === 'running';
       var stopped = !running;
       var stCls  = running ? 'text-green-600 font-medium' : 'text-red-500 font-medium';
-      var svcEsc = escapeHtml(row.svc);
+      var svcEsc = escapeHtml(svc.name);
+      var stateLabel = svc.kind === 'process' && svc.pid ? svc.state + ' (PID ' + svc.pid + ')' : svc.state;
       html += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
         '<td class="px-5 py-1.5 text-sm font-medium text-gray-500" style="width:9rem; white-space:nowrap">' + svcEsc + '</td>' +
-        '<td class="py-1.5 text-sm ' + stCls + ' pr-4" style="width:1px; white-space:nowrap">' + escapeHtml(row.st) + '</td>' +
+        '<td class="py-1.5 text-sm ' + stCls + ' pr-4" style="width:1px; white-space:nowrap">' + escapeHtml(stateLabel) + '</td>' +
         '<td class="py-1.5"><div class="flex gap-1 justify-end">' +
         '<button onclick="runServiceCmdFor(\'start\',this.dataset.svc,this)" data-svc="' + svcEsc + '" class="btn btn-xs btn-outline btn-success' + (running ? ' btn-disabled' : '') + '" style="width:6rem"' + (running ? ' disabled' : '') + '>Start</button>' +
         '<button onclick="runServiceCmdFor(\'stop\',this.dataset.svc,this)" data-svc="' + svcEsc + '" class="btn btn-xs btn-outline btn-error' + (stopped ? ' btn-disabled' : '') + '" style="width:6rem"' + (stopped ? ' disabled' : '') + '>Stop</button>' +
         '<button onclick="runServiceCmdFor(\'restart\',this.dataset.svc,this)" data-svc="' + svcEsc + '" class="btn btn-xs btn-outline' + (stopped ? ' btn-disabled' : '') + '" style="width:6rem"' + (stopped ? ' disabled' : '') + '>Restart</button>' +
         '</div></td>' +
         '<td class="py-1.5 pl-3 pr-5" style="width:1px; white-space:nowrap"><div class="flex gap-1">' +
-        '<a href="/backend/' + envName + '/services/' + encodeURIComponent(row.svc) + '/config" class="btn btn-xs btn-outline" style="width:4rem">Config</a>' +
-        '<a href="/backend/' + envName + '/services/' + encodeURIComponent(row.svc) + '/log" class="btn btn-xs btn-outline">Log</a>' +
+        '<a href="/backend/' + envName + '/services/' + encodeURIComponent(svc.name) + '/config" class="btn btn-xs btn-outline" style="width:4rem">Config</a>' +
+        '<a href="/backend/' + envName + '/services/' + encodeURIComponent(svc.name) + '/log" class="btn btn-xs btn-outline">Log</a>' +
         '</div></td>' +
         '</tr>';
     });
@@ -500,35 +501,25 @@ var envName = {{ env.name | tojson }};
     if (icon) icon.classList.add('animate-spin');
     var wrap = document.getElementById('status-table-wrap');
     if (wrap) wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-gray-400">Loading…</td></tr>';
-    var lines = [];
-    var es = new EventSource('/backend/' + envName + '/stream?cmd=status');
-    es.onmessage = function (e) { if (e.data.trim()) lines.push(e.data.trim()); };
-    es.addEventListener('done', function () {
-      es.close();
-      if (btn) btn.disabled = false;
-      if (icon) icon.classList.remove('animate-spin');
-      renderStatusTable(lines);
-    });
-    es.onerror = function () {
-      es.close();
-      if (btn) btn.disabled = false;
-      if (icon) icon.classList.remove('animate-spin');
-      if (wrap) wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-red-400">Error fetching status.</td></tr>';
-    };
+    fetch('/api/backend/' + envName + '/status')
+      .then(function (r) { if (!r.ok) throw new Error('status fetch failed'); return r.json(); })
+      .then(function (data) {
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        renderStatusTable(data.services);
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        if (wrap) wrap.innerHTML = '<tr><td colspan="4" class="px-5 py-2 text-sm text-red-400">Error fetching status.</td></tr>';
+      });
   };
 
-  function renderDeviceStatusTable(lines) {
+  function renderDeviceStatusTable(status) {
     var wrap = document.getElementById('device-status-wrap');
     if (!wrap) return;
-    var status = '';
-    lines.forEach(function (line) {
-      var low = line.toLowerCase();
-      if (low.includes('maintenance')) status = 'maintenance';
-      else if (low.includes('inactive'))    status = 'inactive';
-      else if (low.includes('active'))      status = 'active';
-    });
     if (!status) {
-      wrap.innerHTML = '<p class="text-sm text-gray-400 px-5 py-2">' + escapeHtml(lines.join(' ') || 'No data.') + '</p>';
+      wrap.innerHTML = '<p class="text-sm text-gray-400 px-5 py-2">No data.</p>';
       return;
     }
     var cls = status === 'active'      ? 'text-green-600 font-medium'
@@ -555,26 +546,23 @@ var envName = {{ env.name | tojson }};
     if (icon) icon.classList.add('animate-spin');
     var wrap = document.getElementById('device-status-wrap');
     if (wrap) wrap.innerHTML = '<p class="text-sm text-gray-400 px-5 py-2">Loading…</p>';
-    var lines = [];
-    var es = new EventSource('/backend/' + envName + '/stream?cmd=device-status-show');
-    es.onmessage = function (e) { if (e.data.trim()) lines.push(e.data.trim()); };
-    es.addEventListener('done', function () {
-      es.close();
-      if (btn) btn.disabled = false;
-      if (icon) icon.classList.remove('animate-spin');
-      renderDeviceStatusTable(lines);
-    });
-    es.onerror = function () {
-      es.close();
-      if (btn) btn.disabled = false;
-      if (icon) icon.classList.remove('animate-spin');
-      if (wrap) wrap.innerHTML = '<p class="text-sm text-red-400 px-5 py-2">Error fetching device status.</p>';
-    };
+    fetch('/api/backend/' + envName + '/device-status')
+      .then(function (r) { if (!r.ok) throw new Error('device-status fetch failed'); return r.json(); })
+      .then(function (data) {
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        renderDeviceStatusTable(data.device_status);
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        if (wrap) wrap.innerHTML = '<p class="text-sm text-red-400 px-5 py-2">Error fetching device status.</p>';
+      });
   };
 
   window.setDeviceStatus = function (status, btn) {
     var params = new URLSearchParams({ cmd: 'device-status-set', status: status });
-    startStream('/backend/' + envName + '/stream?' + params, 'device-status ' + status, btn,
+    startStream('/api/backend/' + envName + '/stream?' + params, 'device-status ' + status, btn,
       function () { window.fetchDeviceStatus(null); });
   };
 

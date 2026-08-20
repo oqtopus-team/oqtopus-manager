@@ -14,9 +14,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class CommandResult:
-    """Outcome of a non-streamed ``oqtopus`` subcommand invocation."""
+    """Outcome of a non-streamed ``oqtopus`` subcommand invocation.
 
-    returncode: int
+    ``returncode`` is None to represent a timeout: the process was killed
+    before it could exit, so there is no exit status to report.
+    """
+
+    returncode: int | None
     stdout: str
     stderr: str
 
@@ -30,16 +34,26 @@ class CommandResult:
         """
         return self.returncode == 0
 
+    @property
+    def timed_out(self) -> bool:
+        """Whether the command was killed for exceeding its timeout.
+
+        Returns:
+            True if no exit status was ever observed.
+
+        """
+        return self.returncode is None
+
 
 async def _drain_stdout_queue(
     queue: asyncio.Queue[bytes | None],
     process: asyncio.subprocess.Process,
     reader_task: asyncio.Task[None],
 ) -> AsyncGenerator[str]:
-    """Yield SSE data lines from *queue* until EOF or the process exits.
+    """Yield Server-Sent Events data lines from *queue* until EOF or the process exits.
 
     Yields:
-        SSE-formatted data lines.
+        Server-Sent Events-formatted data lines.
 
     """
     while True:
@@ -72,10 +86,10 @@ async def _stream_command(
     argv: list[str],
     cwd: pathlib.Path,
 ) -> AsyncGenerator[str]:
-    """Run *argv* in *cwd* and yield SSE-formatted strings.
+    """Run *argv* in *cwd* and yield Server-Sent Events-formatted strings.
 
     Yields:
-        SSE-formatted strings for streaming to the client.
+        Server-Sent Events-formatted strings for streaming to the client.
 
     Raises:
         RuntimeError: If the subprocess stdout pipe is unexpectedly None.
@@ -136,7 +150,7 @@ async def stream_oqtopus_init(
     """Run ``oqtopus init <name> --template <template>`` in *cwd*.
 
     Yields:
-        SSE-formatted strings for streaming to the client.
+        Server-Sent Events-formatted strings for streaming to the client.
 
     """
     async for chunk in _stream_command(
@@ -148,10 +162,10 @@ async def stream_oqtopus_init(
 async def stream_log_tail(
     log_path: pathlib.Path, tail_lines: int
 ) -> AsyncGenerator[str]:
-    """Stream *log_path* via ``tail -f -n tail_lines``, yielding SSE data lines.
+    """Stream *log_path* via ``tail -f -n tail_lines`` as Server-Sent Events.
 
     Yields:
-        SSE-formatted strings for streaming to the client.
+        Server-Sent Events-formatted strings for streaming to the client.
 
     Raises:
         RuntimeError: If the subprocess stdout pipe is unexpectedly None.
@@ -189,7 +203,7 @@ async def stream_oqtopus_subcommand(
     """Run ``oqtopus <subcommand> <args>`` in *cwd*.
 
     Yields:
-        SSE-formatted strings for streaming to the client.
+        Server-Sent Events-formatted strings for streaming to the client.
 
     """
     async for chunk in _stream_command(["oqtopus", subcommand, *args], cwd):
@@ -197,9 +211,15 @@ async def stream_oqtopus_subcommand(
 
 
 async def run_oqtopus_subcommand_output(
-    subcommand: str, args: list[str], cwd: pathlib.Path
+    subcommand: str,
+    args: list[str],
+    cwd: pathlib.Path,
+    timeout: float,  # noqa: ASYNC109
 ) -> CommandResult:
     """Run ``oqtopus <subcommand> <args>`` in *cwd* and capture stdout/stderr.
+
+    If the process has not exited within *timeout* seconds, it is killed and
+    a CommandResult with ``returncode=None`` (see ``timed_out``) is returned.
 
     Returns:
         CommandResult with the exit code and decoded stdout/stderr, kept
@@ -208,7 +228,7 @@ async def run_oqtopus_subcommand_output(
 
     Raises:
         RuntimeError: If the subprocess returncode is unexpectedly None after
-            ``communicate()`` returns.
+            ``communicate()`` returns (outside of the timeout path).
 
     """
     try:
@@ -226,7 +246,19 @@ async def run_oqtopus_subcommand_output(
             stdout="",
             stderr="oqtopus command not found. Please install oqtopus-cli first.",
         )
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        await process.wait()
+        return CommandResult(
+            returncode=None,
+            stdout="",
+            stderr=(
+                f"oqtopus {subcommand} {' '.join(args)} timed out after {timeout}s"
+            ),
+        )
     if process.returncode is None:
         msg = "subprocess returncode is None after communicate()"
         raise RuntimeError(msg)

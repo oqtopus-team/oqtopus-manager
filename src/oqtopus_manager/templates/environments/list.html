@@ -53,8 +53,7 @@
     <tbody id="env-list">
       {% for item in env_items %}
       {% set env = item.env %}
-      <tr class="hover:bg-gray-50 transition-colors" id="env-row-{{ env.name }}"
-          {% if item.all_installed %}data-fetch-status="{{ env.name }}"{% endif %}>
+      <tr class="hover:bg-gray-50 transition-colors" id="env-row-{{ env.name }}">
         <td>
           <a href="{{ url_prefix }}/{{ env.name }}"
              class="font-semibold text-[#4887FA] hover:text-[#3672e8] hover:underline underline-offset-2">
@@ -81,90 +80,65 @@
 
 <script>
 (function () {
-  var urlPrefix = {{ url_prefix | tojson }};
+  var apiUrlPrefix = {{ api_url_prefix | tojson }};
   var hasDeviceStatus = {{ has_device_status | tojson }};
 
-  function fetchEnvStatus(envName, onDone) {
-    var serviceEl = document.getElementById('service-' + envName);
-    var base = urlPrefix + '/' + encodeURIComponent(envName) + '/stream?cmd=';
-    var pending = hasDeviceStatus ? 2 : 1;
-    function checkDone() { if (--pending === 0 && onDone) onDone(); }
-
-    if (hasDeviceStatus) {
-      var deviceEl = document.getElementById('device-' + envName);
-      var deviceLines = [];
-      var des = new EventSource(base + 'device-status-show');
-      des.onmessage = function (e) { if (e.data.trim()) deviceLines.push(e.data.trim()); };
-      des.addEventListener('done', function (e) {
-        des.close(); checkDone();
-        if (e.data !== 'success' || !deviceEl) return;
-        var status = '';
-        deviceLines.forEach(function (line) {
-          var low = line.toLowerCase();
-          if (low.includes('maintenance')) status = 'maintenance';
-          else if (low.includes('inactive'))   status = 'inactive';
-          else if (low.includes('active'))     status = 'active';
-        });
-        if (status) {
-          var cls = status === 'active'   ? 'text-green-600 font-medium'
-                  : status === 'inactive' ? 'text-red-500 font-medium'
-                  :                         'text-yellow-600 font-medium';
-          deviceEl.innerHTML = '<span class="' + cls + '">' + status + '</span>';
-        }
-      });
-      des.onerror = function () { des.close(); checkDone(); };
+  function renderServiceCell(el, outcome) {
+    if (!el) return;
+    if (!outcome) { el.innerHTML = ''; return; }
+    if (outcome.error) {
+      el.innerHTML = '<span class="text-red-400 text-xs">' + (outcome.error.title || 'error') + '</span>';
+      return;
     }
+    var services = outcome.data.services;
+    if (!services.length) { el.innerHTML = ''; return; }
+    var running = services.filter(function (s) { return s.state === 'running'; }).length;
+    var cls = running === services.length ? 'text-green-600 font-medium'
+            : running > 0               ? 'text-yellow-600 font-medium'
+            :                              'text-red-500 font-medium';
+    el.innerHTML = '<span class="' + cls + '">' + running + '/' + services.length + ' running</span>';
+  }
 
-    var serviceLines = [];
-    var ses = new EventSource(base + 'status');
-    ses.onmessage = function (e) { if (e.data.trim()) serviceLines.push(e.data.trim()); };
-    ses.addEventListener('done', function (e) {
-      ses.close(); checkDone();
-      if (e.data !== 'success' || !serviceEl) return;
-      var statuses = [];
-      serviceLines.forEach(function (line) {
-        var idx = line.indexOf(':');
-        if (idx > 0) statuses.push(line.slice(idx + 1).trim());
-      });
-      if (statuses.length) {
-        var running = statuses.filter(function (s) { return s.toLowerCase().startsWith('running'); }).length;
-        var cls = running === statuses.length ? 'text-green-600 font-medium'
-                : running > 0               ? 'text-yellow-600 font-medium'
-                :                              'text-red-500 font-medium';
-        serviceEl.innerHTML = '<span class="' + cls + '">' + running + '/' + statuses.length + ' running</span>';
-      }
-    });
-    ses.onerror = function () { ses.close(); checkDone(); };
+  function renderDeviceCell(el, outcome) {
+    if (!el) return;
+    if (!outcome || outcome.error || !outcome.data.device_status) { el.innerHTML = ''; return; }
+    var status = outcome.data.device_status;
+    var cls = status === 'active'   ? 'text-green-600 font-medium'
+            : status === 'inactive' ? 'text-red-500 font-medium'
+            :                         'text-yellow-600 font-medium';
+    el.innerHTML = '<span class="' + cls + '">' + status + '</span>';
+  }
+
+  // One request for the whole page instead of 2N Server-Sent Events connections.
+  // `include_status=true` gates status/device-status on the server to
+  // environments that are fully installed (server-side all_installed
+  // check, same behavior the old per-row fetch relied on).
+  function fetchAll(onDone) {
+    fetch(apiUrlPrefix + '?include_status=true')
+      .then(function (r) { return r.json(); })
+      .then(function (body) {
+        body.environments.forEach(function (entry) {
+          renderServiceCell(document.getElementById('service-' + entry.name), entry.status);
+          if (hasDeviceStatus) {
+            renderDeviceCell(document.getElementById('device-' + entry.name), entry.device_status);
+          }
+        });
+      })
+      .catch(function () {})
+      .finally(function () { if (onDone) onDone(); });
   }
 
   window.refreshAllStatus = function (btn) {
     var icon = btn ? btn.querySelector('svg') : null;
     if (btn) btn.disabled = true;
     if (icon) icon.classList.add('animate-spin');
-    var rows = document.querySelectorAll('[data-fetch-status]');
-    var remaining = rows.length;
-    if (!remaining) {
+    fetchAll(function () {
       if (btn) btn.disabled = false;
       if (icon) icon.classList.remove('animate-spin');
-      return;
-    }
-    rows.forEach(function (row) {
-      var name = row.dataset.fetchStatus;
-      if (hasDeviceStatus) { var d = document.getElementById('device-' + name); if (d) d.innerHTML = ''; }
-      var s = document.getElementById('service-' + name);
-      if (s) s.innerHTML = '';
-      fetchEnvStatus(name, function () {
-        if (--remaining === 0) {
-          if (btn) btn.disabled = false;
-          if (icon) icon.classList.remove('animate-spin');
-        }
-      });
     });
   };
 
-  document.querySelectorAll('[data-fetch-status]').forEach(function (row) {
-    fetchEnvStatus(row.dataset.fetchStatus);
-  });
+  fetchAll();
 })();
 </script>
 
@@ -206,7 +180,7 @@
   </div>
 </div>
 <script>
-  var _listUrlPrefix = {{ url_prefix | tojson }};
+  var _listUrlPrefix = {{ api_url_prefix | tojson }};
 
   function showFormError(msg) {
     var formError = document.getElementById('form-error');

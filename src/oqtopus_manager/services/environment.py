@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
 import pathlib
@@ -12,10 +13,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from oqtopus_manager.models.environment import Environment
 from oqtopus_manager.services.exceptions import (
+    CliNotFoundError,
+    CliTimeoutError,
+    CommandFailedError,
     EnvironmentAlreadyExistsError,
     EnvironmentNotFoundError,
     EnvironmentValidationError,
@@ -24,17 +28,72 @@ from oqtopus_manager.services.exceptions import (
     LockNotHeldError,
     LockTokenMismatchError,
     LogFileNotFoundError,
+    ReservedEnvironmentNameError,
+    ServiceError,
     ServicesStillRunningError,
 )
-from oqtopus_manager.util.cli import run_oqtopus_subcommand_output, stream_oqtopus_init
+from oqtopus_manager.util.cli import (
+    CommandResult,
+    run_oqtopus_subcommand_output,
+    stream_oqtopus_init,
+)
 from oqtopus_manager.util.parse import parse_service_status
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
     from oqtopus_manager.config import AppConfig
 
+# GET /api/{template}?include_status=true issues up to N + 2M subprocesses
+# (N environments' info + M installed environments' status/device-status).
+# Bounded to avoid fork-cost blowup on hosts with many environments; tune
+# only if this proves to be a real bottleneck in practice.
+_LIST_FETCH_CONCURRENCY = 8
+
 logger = logging.getLogger(__name__)
+
+# First-path-segment route names that collide with `/{template}/{name}` and
+# would make an environment of that name unreachable through the UI.
+RESERVED_ENVIRONMENT_NAMES = frozenset({"new", "stream"})
+
+# The value run_oqtopus_subcommand_output returns for FileNotFoundError,
+# i.e. "oqtopus" isn't on PATH.
+_CLI_NOT_FOUND_RETURNCODE = 127
+
+
+def raise_for_command_result(result: CommandResult) -> None:
+    """Raise the matching ServiceError if *result* did not succeed.
+
+    Raises:
+        CliTimeoutError: If the command was killed for exceeding its timeout.
+        CliNotFoundError: If the oqtopus executable was not found (rc 127).
+        CommandFailedError: If the command exited with any other non-zero code.
+
+    """
+    if result.timed_out:
+        raise CliTimeoutError(result.stderr)
+    if result.ok:
+        return
+    if result.returncode == _CLI_NOT_FOUND_RETURNCODE:
+        raise CliNotFoundError
+    msg = result.stderr.strip() or "oqtopus command failed"
+    raise CommandFailedError(msg, returncode=result.returncode)
+
+
+def check_reserved_environment_names(cfg: AppConfig) -> list[str]:
+    """Return names of already-registered environments that are now reserved.
+
+    Intended for a startup scan: these environments exist but their detail
+    page is unreachable because a fixed route (e.g. ``/backend/new``)
+    shadows ``/{template}/{name}``.
+
+    Returns:
+        Sorted list of colliding environment names (possibly empty).
+
+    """
+    return sorted({
+        e.name for e in cfg.load_environments() if e.name in RESERVED_ENVIRONMENT_NAMES
+    })
 
 
 def get_environment_or_404(name: str, cfg: AppConfig) -> Environment:
@@ -53,28 +112,11 @@ def get_environment_or_404(name: str, cfg: AppConfig) -> Environment:
     return env
 
 
-def read_metadata(env_root: pathlib.Path, strip_prefix: str = "") -> dict[str, str]:
-    """Parse <env_root>/.metadata (key=value lines) into a dict.
-
-    ``strip_prefix`` is removed from each key, for templates whose metadata
-    keys are namespaced (e.g. ``cloud_local_frontend_version``).
-
-    Returns:
-        Dict mapping key strings to value strings.
-
-    """
-    path = env_root / ".metadata"
-    if not path.exists():
-        return {}
-    result: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            result[key.strip().removeprefix(strip_prefix)] = value.strip()
-    return result
-
-
-async def has_running_services(subcommand: str, root_dir: pathlib.Path) -> bool:
+async def has_running_services(
+    subcommand: str,
+    root_dir: pathlib.Path,
+    timeout: float,  # noqa: ASYNC109
+) -> bool:
     """Return True if ``oqtopus <subcommand> status`` reports any running service.
 
     Fails closed: if the status check itself cannot be completed, the state
@@ -87,10 +129,12 @@ async def has_running_services(subcommand: str, root_dir: pathlib.Path) -> bool:
         status check failed.
 
     """
-    result = await run_oqtopus_subcommand_output(subcommand, ["status"], root_dir)
+    result = await run_oqtopus_subcommand_output(
+        subcommand, ["status"], root_dir, timeout
+    )
     if not result.ok:
         logger.warning(
-            "oqtopus %s status failed (returncode=%d): %s",
+            "oqtopus %s status failed (returncode=%s): %s",
             subcommand,
             result.returncode,
             result.stderr.strip(),
@@ -110,8 +154,12 @@ def validate_new_environment(
     Raises:
         EnvironmentAlreadyExistsError: If an environment with this name exists.
         EnvironmentValidationError: If the name/template/root_path is invalid.
+        ReservedEnvironmentNameError: If the name collides with a fixed route
+            segment (see RESERVED_ENVIRONMENT_NAMES).
 
     """
+    if name in RESERVED_ENVIRONMENT_NAMES:
+        raise ReservedEnvironmentNameError(name)
     if any(e.name == name for e in cfg.load_environments()):
         raise EnvironmentAlreadyExistsError(name)
     try:
@@ -130,7 +178,7 @@ async def stream_environment_init(
     """Run ``oqtopus init`` and stream its output, saving the environment on success.
 
     Yields:
-        SSE-formatted strings for streaming to the client.
+        Server-Sent Events-formatted strings for streaming to the client.
 
     """
     new_env = Environment(
@@ -175,7 +223,9 @@ async def delete_environment(cfg: AppConfig, name: str, subcommand: str) -> None
         raise EnvironmentNotFoundError(name)
 
     root_dir = target.resolved_root_path(cfg.default_environment_base_path)
-    if root_dir.exists() and await has_running_services(subcommand, root_dir):
+    if root_dir.exists() and await has_running_services(
+        subcommand, root_dir, cfg.oqtopus_cli_timeout_sec
+    ):
         raise ServicesStillRunningError(name)
 
     logger.info("Deleting environment '%s' (root=%s)", name, root_dir)
@@ -366,3 +416,82 @@ def resolve_existing_log_file(
         msg = "Log file not found."
         raise LogFileNotFoundError(msg)
     return log_file
+
+
+# ── GET /api/{template}?include_status aggregation ──────────────────────────
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """Either a successful result or the ServiceError raised fetching it."""
+
+    data: BaseModel | None
+    error: ServiceError | None
+
+
+async def _fetch_outcome(coro: Awaitable[BaseModel]) -> Outcome:
+    try:
+        result = await coro
+    except ServiceError as exc:
+        return Outcome(data=None, error=exc)
+    return Outcome(data=result, error=None)
+
+
+async def build_environment_list(  # noqa: PLR0913
+    cfg: AppConfig,
+    environments: list[Environment],
+    template: str,
+    *,
+    include_status: bool,
+    has_device_status: bool,
+    get_info: Callable[[AppConfig, str], Awaitable[BaseModel]],
+    get_status: Callable[[AppConfig, str], Awaitable[BaseModel]],
+    get_device_status: Callable[[AppConfig, str], Awaitable[BaseModel]] | None,
+) -> dict:
+    """Fetch info (and optionally status/device-status) for every environment.
+
+    Per-environment failures are captured as an outcome rather than aborting
+    the whole request: partial failure is a 200, not an all-or-nothing
+    error. ``status``/``device-status`` are only fetched for environments
+    where ``info`` succeeded and reports ``all_installed`` (preserving the
+    list page's previous ``all_installed``-gated fetch behavior).
+
+    Concurrency is capped at ``_LIST_FETCH_CONCURRENCY`` across the whole
+    call, not per-environment, since a single environment can issue up to
+    three subprocesses (info + status + device-status).
+
+    Returns:
+        Dict with keys ``template`` and ``environments`` (each entry has
+        ``name``, ``environment``, ``status``, and -- for templates with
+        device status -- ``device_status``, as ``Outcome`` instances for
+        the router layer to serialize).
+
+    """
+    sem = asyncio.Semaphore(_LIST_FETCH_CONCURRENCY)
+
+    async def _limited(coro: Awaitable[BaseModel]) -> Outcome:
+        async with sem:
+            return await _fetch_outcome(coro)
+
+    async def _one(env: Environment) -> dict:
+        env_outcome = await _limited(get_info(cfg, env.name))
+        entry: dict = {"name": env.name, "environment": env_outcome}
+
+        status_outcome: Outcome | None = None
+        device_outcome: Outcome | None = None
+        if (
+            include_status
+            and env_outcome.data is not None
+            and getattr(env_outcome.data, "all_installed", False)
+        ):
+            status_outcome = await _limited(get_status(cfg, env.name))
+            if has_device_status and get_device_status is not None:
+                device_outcome = await _limited(get_device_status(cfg, env.name))
+
+        entry["status"] = status_outcome
+        if has_device_status:
+            entry["device_status"] = device_outcome
+        return entry
+
+    entries = await asyncio.gather(*(_one(env) for env in environments))
+    return {"template": template, "environments": list(entries)}

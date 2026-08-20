@@ -4,17 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from oqtopus_manager.services.environment import get_environment_or_404
-from oqtopus_manager.services.environment import read_metadata as read_metadata_generic
-from oqtopus_manager.services.exceptions import CommandFailedError, InvalidArgumentError
+from oqtopus_manager.services.environment import (
+    get_environment_or_404,
+    raise_for_command_result,
+)
+from oqtopus_manager.services.exceptions import InvalidArgumentError
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
-from oqtopus_manager.util.parse import parse_versions
+from oqtopus_manager.util.parse import parse_info, parse_status, parse_versions_detailed
 
 if TYPE_CHECKING:
     import pathlib
 
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.models.environment import Environment
+    from oqtopus_manager.util.cli import CommandResult
+    from oqtopus_manager.util.parse import EnvironmentData, StatusData, VersionsData
 
 _SUBCOMMAND = "cloud-local"
 _VALID_SERVICES = frozenset({
@@ -26,47 +30,36 @@ _VALID_SERVICES = frozenset({
     "provider",
     "user",
 })
-_VALID_COMPONENTS = frozenset({"cloud", "frontend", "admin"})
+# Single source of truth for the component list; this was previously
+# duplicated across this module, routers/cloud_local/detail.py, and the
+# detail-page template. Note "admin" is a component name here and also a
+# service name in _VALID_SERVICES above -- distinct namespaces that happen
+# to share a string.
+COMPONENTS: tuple[str, ...] = ("cloud", "frontend", "admin")
+_VALID_COMPONENTS = frozenset(COMPONENTS)
 _SERVICE_CMDS = frozenset({"start", "stop", "restart"})
 _COMPONENT_CMDS = frozenset({"versions", "install", "update", "uninstall"})
-
-VERSION_KEYS = ["cloud_version", "frontend_version", "admin_version"]
-
-
-def read_metadata(env_root: pathlib.Path) -> dict[str, str]:
-    """Parse <env_root>/.metadata (key=value lines) into a dict.
-
-    Strips the ``cloud_local_`` prefix so keys match
-    cloud_version/frontend_version/admin_version.
-
-    Returns:
-        Dict mapping key strings to value strings.
-
-    """
-    return read_metadata_generic(env_root, strip_prefix="cloud_local_")
 
 
 def build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
     """Build template context for the cloud-local list page.
 
+    Deliberately excludes any per-environment CLI-derived data (status,
+    all_installed): the list must render immediately from
+    ``environments.yaml`` alone, without spawning a subprocess per
+    environment. The client fetches
+    ``GET /api/cloud-local?include_status=true`` after load to fill in the
+    rest.
+
     Returns:
         Dict with env_items and metadata for the list template.
 
     """
-    env_items = []
-    for env in environments:
-        resolved = env.resolved_root_path(cfg.default_environment_base_path)
-        meta = read_metadata(resolved)
-        all_installed = bool(
-            meta.get("cloud_version")
-            and meta.get("frontend_version")
-            and meta.get("admin_version")
-        )
-        env_items.append({"env": env, "all_installed": all_installed})
     return {
-        "env_items": env_items,
+        "env_items": [{"env": env} for env in environments],
         "base_path": cfg.default_environment_base_path,
         "url_prefix": "/cloud-local",
+        "api_url_prefix": "/api/cloud-local",
         "page_title": "Cloud Local",
         "page_description": "Manage your OQTOPUS cloud-local environments.",
         "has_device_status": False,
@@ -158,6 +151,11 @@ def build_stream_args(
 ) -> list[str]:
     """Translate validated query params into oqtopus cloud-local argv.
 
+    ``status``/``info`` are deliberately not handled here: the UI reads
+    them from the JSON endpoints (GET .../status, .../{name}) instead of
+    this stream dispatcher. ``versions`` stays -- it still backs the
+    console's raw-output display alongside the JSON endpoint.
+
     Returns:
         List of string arguments to pass to the oqtopus cloud-local CLI.
 
@@ -166,8 +164,6 @@ def build_stream_args(
             is provided.
 
     """
-    if cmd in {"status", "info"}:
-        return [cmd]
     if cmd in _SERVICE_CMDS:
         return build_service_args(cmd, service, foreground)
     if cmd in _COMPONENT_CMDS:
@@ -176,32 +172,65 @@ def build_stream_args(
     raise InvalidArgumentError(msg)
 
 
-async def get_component_versions(
-    cfg: AppConfig, name: str, component: str
-) -> list[str]:
-    """Run ``oqtopus cloud-local versions <component>`` and parse the version list.
+async def _run(
+    cfg: AppConfig, name: str, args: list[str]
+) -> tuple[Environment, CommandResult]:
+    """Resolve *name* and run ``oqtopus cloud-local <args>``, raising on failure.
 
     Returns:
-        Matched version strings and branch tokens, in output order.
+        The (Environment, CommandResult) pair for the caller to parse.
+
+    """
+    env = get_environment_or_404(name, cfg)
+    cwd = env.resolved_root_path(cfg.default_environment_base_path)
+    result = await run_oqtopus_subcommand_output(
+        _SUBCOMMAND, args, cwd, cfg.oqtopus_cli_timeout_sec
+    )
+    raise_for_command_result(result)
+    return env, result
+
+
+async def get_status(cfg: AppConfig, name: str) -> StatusData:
+    """Run ``oqtopus cloud-local status`` and parse it into StatusData.
+
+    Returns:
+        StatusData for the ``GET /api/cloud-local/{name}/status`` response.
+
+    """
+    _, result = await _run(cfg, name, ["status"])
+    return parse_status(result, template="cloud-local", environment_name=name)
+
+
+async def get_info(cfg: AppConfig, name: str) -> EnvironmentData:
+    """Run ``oqtopus cloud-local info`` and parse it into EnvironmentData.
+
+    Returns:
+        EnvironmentData for the ``GET /api/cloud-local/{name}`` response.
+
+    """
+    _, result = await _run(cfg, name, ["info"])
+    return parse_info(
+        result,
+        template="cloud-local",
+        components=COMPONENTS,
+        strip_prefix="cloud_local_",
+    )
+
+
+async def get_component_versions_detailed(
+    cfg: AppConfig, name: str, component: str
+) -> VersionsData:
+    """Run ``oqtopus cloud-local versions <component>`` and parse it into VersionsData.
+
+    Returns:
+        VersionsData for the components/{component}/versions response.
 
     Raises:
         InvalidArgumentError: If the component is not recognized.
-        CommandFailedError: If the CLI invocation fails.
 
     """
     if component not in _VALID_COMPONENTS:
         msg = f"Invalid component '{component}'"
         raise InvalidArgumentError(msg)
-
-    env = get_environment_or_404(name, cfg)
-    cwd = env.resolved_root_path(cfg.default_environment_base_path)
-    result = await run_oqtopus_subcommand_output(
-        _SUBCOMMAND, ["versions", component], cwd
-    )
-    if not result.ok:
-        msg = (
-            result.stderr.strip()
-            or f"oqtopus {_SUBCOMMAND} versions {component} failed"
-        )
-        raise CommandFailedError(msg)
-    return parse_versions(result)
+    _, result = await _run(cfg, name, ["versions", component])
+    return parse_versions_detailed(result, template="cloud-local", component=component)

@@ -119,9 +119,10 @@ class TestDotenvPage:
 
     def test_url_prefix_in_response(self, client: TestClient) -> None:
         resp = client.get("/cloud-local/cl-demo/dotenv")
-        # The download link and JS fetch calls must use /cloud-local, not /backend
-        assert b"/cloud-local" in resp.content
+        # The download link and JS fetch calls must use /api/cloud-local, not /backend
+        assert b"/api/cloud-local" in resp.content
         assert b"'/backend/'" not in resp.content
+        assert b"/api/backend" not in resp.content
 
 
 # ── lock / unlock / force-unlock ─────────────────────────────────────────────
@@ -129,7 +130,7 @@ class TestDotenvPage:
 
 class TestDotenvLock:
     def test_acquire_returns_token(self, client: TestClient) -> None:
-        resp = client.post("/backend/demo/dotenv/lock")
+        resp = client.post("/api/backend/demo/dotenv/lock")
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
@@ -139,7 +140,7 @@ class TestDotenvLock:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _write_lock(_dotenv_lock_path(tmp_env))
-        resp = client.post("/backend/demo/dotenv/lock")
+        resp = client.post("/api/backend/demo/dotenv/lock")
         assert resp.status_code == 409
         assert resp.json()["ok"] is False
 
@@ -147,7 +148,7 @@ class TestDotenvLock:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         tok = _write_lock(_dotenv_lock_path(tmp_env))
-        resp = client.post("/backend/demo/dotenv/unlock", json={"token": tok})
+        resp = client.post("/api/backend/demo/dotenv/unlock", json={"token": tok})
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert not _dotenv_lock_path(tmp_env).exists()
@@ -156,21 +157,21 @@ class TestDotenvLock:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _write_lock(_dotenv_lock_path(tmp_env))
-        resp = client.post("/backend/demo/dotenv/unlock", json={"token": "wrong"})
+        resp = client.post("/api/backend/demo/dotenv/unlock", json={"token": "wrong"})
         assert resp.status_code == 403
 
     def test_force_unlock_clears_lock(
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _write_lock(_dotenv_lock_path(tmp_env))
-        resp = client.post("/backend/demo/dotenv/force-unlock")
+        resp = client.post("/api/backend/demo/dotenv/force-unlock")
         assert resp.status_code == 200
         assert not _dotenv_lock_path(tmp_env).exists()
 
     def test_cloud_local_lock_uses_correct_path(
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
-        resp = client.post("/cloud-local/cl-demo/dotenv/lock")
+        resp = client.post("/api/cloud-local/cl-demo/dotenv/lock")
         assert resp.status_code == 200
         cl_lock = tmp_env / "environments" / "cl-demo" / "config" / ".env.lock"
         assert cl_lock.exists()
@@ -183,9 +184,9 @@ class TestDotenvSave:
     def test_saves_content_and_creates_backup(
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
-        tok = client.post("/backend/demo/dotenv/lock").json()["token"]
+        tok = client.post("/api/backend/demo/dotenv/lock").json()["token"]
         resp = client.post(
-            "/backend/demo/dotenv/save",
+            "/api/backend/demo/dotenv/save",
             json={"token": tok, "content": "KEY=updated\n"},
         )
         assert resp.json()["ok"] is True
@@ -196,7 +197,7 @@ class TestDotenvSave:
 
     def test_no_lock_returns_409(self, client: TestClient) -> None:
         resp = client.post(
-            "/backend/demo/dotenv/save", json={"token": "any", "content": ""}
+            "/api/backend/demo/dotenv/save", json={"token": "any", "content": ""}
         )
         assert resp.status_code == 409
 
@@ -205,7 +206,7 @@ class TestDotenvSave:
     ) -> None:
         _write_lock(_dotenv_lock_path(tmp_env))
         resp = client.post(
-            "/backend/demo/dotenv/save", json={"token": "wrong", "content": ""}
+            "/api/backend/demo/dotenv/save", json={"token": "wrong", "content": ""}
         )
         assert resp.status_code == 403
 
@@ -215,7 +216,7 @@ class TestDotenvSave:
 
 class TestDotenvDownload:
     def test_returns_file_content(self, client: TestClient) -> None:
-        resp = client.get("/backend/demo/dotenv/download")
+        resp = client.get("/api/backend/demo/dotenv/download")
         assert resp.status_code == 200
         assert b"KEY=value" in resp.content
 
@@ -223,15 +224,15 @@ class TestDotenvDownload:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         (tmp_env / "environments" / "demo" / "config" / ".env").unlink()
-        assert client.get("/backend/demo/dotenv/download").status_code == 404
+        assert client.get("/api/backend/demo/dotenv/download").status_code == 404
 
     def test_cloud_local_download(self, client: TestClient) -> None:
-        resp = client.get("/cloud-local/cl-demo/dotenv/download")
+        resp = client.get("/api/cloud-local/cl-demo/dotenv/download")
         assert resp.status_code == 200
         assert b"KEY=cl-value" in resp.content
 
     def test_nonexistent_env_returns_404(self, client: TestClient) -> None:
-        assert client.get("/backend/ghost/dotenv/download").status_code == 404
+        assert client.get("/api/backend/ghost/dotenv/download").status_code == 404
 
 
 # ── log page ─────────────────────────────────────────────────────────────────
@@ -292,7 +293,7 @@ class TestLogPage:
 class TestLogStream:
     def test_backend_no_log_file_returns_404(self, client: TestClient) -> None:
         # No logging.yaml configured → _get_log_file returns None
-        assert client.get("/backend/demo/services/engine/log/stream").status_code == 404
+        assert client.get("/api/backend/demo/services/engine/log/stream").status_code == 404
 
     def test_backend_stream_returns_sse(
         self, client: TestClient, tmp_env: pathlib.Path, mocker: MockerFixture
@@ -305,14 +306,14 @@ class TestLogStream:
         mocker.patch(
             "oqtopus_manager.routers._log_routes.stream_log_tail", side_effect=_gen
         )
-        resp = client.get("/backend/demo/services/engine/log/stream")
+        resp = client.get("/api/backend/demo/services/engine/log/stream")
         assert resp.status_code == 200
         assert b"hello" in resp.content
 
     def test_cloud_local_no_log_file_returns_404(self, client: TestClient) -> None:
         # logs/worker/service.log doesn't exist yet
         assert (
-            client.get("/cloud-local/cl-demo/services/worker/log/stream").status_code
+            client.get("/api/cloud-local/cl-demo/services/worker/log/stream").status_code
             == 404
         )
 
@@ -327,7 +328,7 @@ class TestLogStream:
         mocker.patch(
             "oqtopus_manager.routers._log_routes.stream_log_tail", side_effect=_gen
         )
-        resp = client.get("/cloud-local/cl-demo/services/worker/log/stream")
+        resp = client.get("/api/cloud-local/cl-demo/services/worker/log/stream")
         assert resp.status_code == 200
         assert b"cl-line" in resp.content
 
@@ -338,20 +339,20 @@ class TestLogStream:
 class TestLogDownload:
     def test_backend_no_log_file_returns_404(self, client: TestClient) -> None:
         assert (
-            client.get("/backend/demo/services/engine/log/download").status_code == 404
+            client.get("/api/backend/demo/services/engine/log/download").status_code == 404
         )
 
     def test_backend_download_returns_file(
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _make_backend_log(tmp_env)
-        resp = client.get("/backend/demo/services/engine/log/download")
+        resp = client.get("/api/backend/demo/services/engine/log/download")
         assert resp.status_code == 200
         assert b"log line 1" in resp.content
 
     def test_cloud_local_no_log_file_returns_404(self, client: TestClient) -> None:
         assert (
-            client.get("/cloud-local/cl-demo/services/worker/log/download").status_code
+            client.get("/api/cloud-local/cl-demo/services/worker/log/download").status_code
             == 404
         )
 
@@ -359,6 +360,6 @@ class TestLogDownload:
         self, client: TestClient, tmp_env: pathlib.Path
     ) -> None:
         _make_cloud_local_log(tmp_env)
-        resp = client.get("/cloud-local/cl-demo/services/worker/log/download")
+        resp = client.get("/api/cloud-local/cl-demo/services/worker/log/download")
         assert resp.status_code == 200
         assert b"cl log line" in resp.content

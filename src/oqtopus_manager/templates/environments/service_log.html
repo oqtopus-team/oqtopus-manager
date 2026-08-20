@@ -91,7 +91,7 @@
         <input id="chk-autoscroll" type="checkbox" class="checkbox checkbox-xs" checked>
         Auto-scroll
       </label>
-      <a href="{{ url_prefix }}/{{ env.name }}/services/{{ service }}/log/download" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download full log file">
+      <a href="{{ api_url_prefix }}/{{ env.name }}/services/{{ service }}/log/download" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1" title="Download full log file">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
           <polyline points="7 10 12 15 17 10"/>
@@ -137,7 +137,7 @@
 <script>
   var envName     = {{ env.name | tojson }};
   var serviceName = {{ service | tojson }};
-  var urlPrefix   = {{ url_prefix | tojson }};
+  var urlPrefix   = {{ api_url_prefix | tojson }};
   var MAX_LINES = {{ buffer_lines }};
   var lineCount = 0;
   var es = null;

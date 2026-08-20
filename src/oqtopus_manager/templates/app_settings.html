@@ -137,7 +137,7 @@
   {% include "_make_editor.html" %}
 
   var cfgEditor = makeEditor({
-    rawContent: {{ config_content | tojson }}, lockTimeoutSec: {{ lock_timeout_sec }}, baseUrl: '/settings/config',
+    rawContent: {{ config_content | tojson }}, lockTimeoutSec: {{ lock_timeout_sec }}, baseUrl: '/api/settings/config',
     detailsId:'details-cfg', viewId:'cfg-view', editId:'cfg-edit', diffId:'cfg-diff',
     editPreId:'cfg-edit-pre', editTaId:'cfg-edit-ta', diffOutId:'cfg-diff-out',
     editBtnId:'cfg-edit-btn', previewBtnId:'cfg-preview-btn', cancelBtnId:'cfg-cancel-btn', dlBtnId:'cfg-download-btn',
@@ -150,7 +150,7 @@
   {% if config_is_locked %}cfgEditor.showLockBadgeOther({{ config_locked_since | tojson }}, {{ config_locked_since_ts }});{% endif %}
 
   var logEditor = makeEditor({
-    rawContent: {{ logging_content | tojson }}, lockTimeoutSec: {{ lock_timeout_sec }}, baseUrl: '/settings/logging',
+    rawContent: {{ logging_content | tojson }}, lockTimeoutSec: {{ lock_timeout_sec }}, baseUrl: '/api/settings/logging',
     detailsId:'details-log', viewId:'log-view', editId:'log-edit', diffId:'log-diff',
     editPreId:'log-edit-pre', editTaId:'log-edit-ta', diffOutId:'log-diff-out',
     editBtnId:'log-edit-btn', previewBtnId:'log-preview-btn', cancelBtnId:'log-cancel-btn', dlBtnId:'log-download-btn',
