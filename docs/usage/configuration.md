@@ -60,6 +60,7 @@ behavior:
   log_tail_lines: 100
   log_buffer_lines: 1000
   file_edit_lock_timeout_sec: 600
+  oqtopus_cli_timeout_sec: 10
 ```
 
 | Key | Type | Required | Default | Description |
@@ -67,6 +68,7 @@ behavior:
 | `log_tail_lines` | integer | **Yes** | — | Number of lines fetched from the end of a log file when the log page first loads. |
 | `log_buffer_lines` | integer | **Yes** | — | Maximum number of lines kept in the browser-side log buffer during live streaming. Older lines are discarded as new ones arrive. |
 | `file_edit_lock_timeout_sec` | integer | **Yes** | — | Seconds before an idle edit lock expires and is released automatically. Prevents files from remaining locked when a browser tab is closed mid-edit. |
+| `oqtopus_cli_timeout_sec` | integer | No | `10` | Seconds before a non-streamed `oqtopus` CLI invocation (status, device status, info, versions) is killed and reported as timed out. Does not apply to streamed commands such as install, build, or service start/stop, which have no timeout. |
 
 ---
 
