@@ -428,6 +428,8 @@ var envName = {{ env.name | tojson }};
       var svcEsc = escapeHtml(svc.name);
       var stateLabel = svc.kind === 'container' && svc.containers && svc.containers.length
         ? svc.state + ' (' + svc.containers.join(', ') + ')'
+        : svc.kind === 'process' && svc.pid
+        ? svc.state + ' (PID ' + svc.pid + ')'
         : svc.state;
       html += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
         '<td class="px-5 py-1.5 text-sm font-medium text-gray-500" style="width:9rem; white-space:nowrap">' + svcEsc + '</td>' +
