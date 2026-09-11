@@ -152,6 +152,58 @@ allow_raw_roles:
 | `oqtopus-manager.operator` | ✓ |
 | `other-app.admin` | ✗ (discarded before role_mappings) |
 
+## public_paths
+
+Routes that skip authentication entirely, regardless of `provider`. Each entry matches by
+HTTP method and Starlette path-template syntax (e.g. `/health` or `/devices/{device_id}`) —
+the same syntax used for real routes, including path parameter converters.
+
+```yaml
+auth:
+  public_paths:
+    - method: GET
+      path: /health
+    - method: GET
+      path: /app-icon
+    - method: GET
+      path: /favicon.ico
+```
+
+| Key | Type | Required | Default | Description |
+|-----|------|----------|---------|-------------|
+| `method` | string | No | `*` | HTTP method to match, or `*` for any method. |
+| `path` | string | **Yes** | — | Path template, matched the same way as a real route. Only the template is matched — path parameter *values* are not checked; authorize those inside the endpoint itself. |
+
+`/health` must stay in this list: fleet reachability checks call it before a node has any
+credentials to present. `/favicon.ico` and `/app-icon` are included so the browser can still
+show the app's icon on a login or `403` error page.
+
+!!! note "`/assets/*` is deliberately not public"
+    The static asset mount is not included here. Files placed under `assets/` are served
+    verbatim to whoever requests them, with no allowlist of what operators may put there —
+    making the whole directory public would extend beyond icons to anything else placed in it.
+
+## public_identity
+
+Synthetic identity assigned to requests that bypass authentication via `public_paths`.
+
+```yaml
+auth:
+  public_identity:
+    default_account: public
+    default_roles: []
+```
+
+| Key | Type | Required | Default | Description |
+|-----|------|----------|---------|-------------|
+| `default_account` | string | No | `public` | Account name attached to bypassed requests. |
+| `default_roles` | list of strings | No | `[]` | Roles attached to bypassed requests. Must match role names defined in `permissions` if the endpoint enforces permissions. |
+
+When `public_identity` is omitted entirely, bypassed requests get `request.state.user = None`
+instead of a synthetic identity. None of the current `public_paths` endpoints check roles or
+permissions, so this section has no practical effect today — it exists for endpoints added
+later under `public_paths` that do.
+
 ## role_mappings
 
 Maps raw role values to display names used throughout the UI.

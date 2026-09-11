@@ -37,6 +37,11 @@ def config_path(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
                 "default_account": "admin_user",
                 "default_roles": ["admin"],
             },
+            "public_paths": [{"method": "GET", "path": "/health"}],
+            "public_identity": {
+                "default_account": "public",
+                "default_roles": [],
+            },
         },
         "enable_debug_endpoint": False,        "permissions": {
             "_extends_": {"admin": "operator"},
@@ -465,7 +470,7 @@ def test_cloud_local_component_versions_invalid_returns_400(
     assert resp.status_code == 400
 
 
-# ── main.py: create_app, version, app-icon, favicon, api-docs ────────────────
+# ── main.py: create_app, health, app-icon, favicon, api-docs ─────────────────
 
 
 def test_create_app_with_empty_templates_raises(
@@ -562,10 +567,14 @@ def test_create_app_with_unsupported_template_raises(
         create_app(cfg_path)
 
 
-def test_version_endpoint(client: TestClient) -> None:
-    resp = client.get("/version")
+def test_health_endpoint(client: TestClient) -> None:
+    resp = client.get("/health")
     assert resp.status_code == 200
-    assert "version" in resp.json()
+    body = resp.json()
+    assert body["status"] == "pass"
+    assert "version" in body
+    assert "description" in body
+    assert "serviceId" not in body
 
 
 def test_app_icon_404_when_not_configured(client: TestClient) -> None:
