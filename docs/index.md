@@ -25,6 +25,7 @@ viewing and configuration editing built in.
 - [Configuration](./usage/configuration.md)
 - [Authentication](./usage/authentication.md)
 - [Permissions](./usage/permissions.md)
+- [Health Check](./usage/health.md)
 
 ## API reference
 

@@ -22,7 +22,7 @@ appearance:
     - backend
   sidebar_links:
     - label: Documentation
-      url: https://github.com/snuffkin/oqtopus-manager
+      url: https://oqtopus-manager.readthedocs.io/
     - label: OQTOPUS Cloud
       url: https://your-cloud-url/
     - label: OQTOPUS Admin
@@ -55,6 +55,21 @@ auth:
       # jwks_url: https://your-jwks-url/    # omit to derive from issuer automatically
       audience: your-audience               # e.g. Cognito App client ID
     # signout_url: https://your-signout-url/  # when set, adds a "Sign out" link to the sidebar
+
+  # Routes that skip authentication entirely, regardless of provider.
+  public_paths:
+    - method: GET
+      path: /health
+    - method: GET
+      path: /app-icon
+    - method: GET
+      path: /favicon.ico
+
+  # Synthetic identity assigned to requests bypassed via public_paths.
+  # Omit entirely to leave request.state.user as None for those requests.
+  public_identity:
+    default_account: public
+    default_roles: []
 
   # raw roles_claim value → display name; unmapped values pass through as-is
   role_mappings:

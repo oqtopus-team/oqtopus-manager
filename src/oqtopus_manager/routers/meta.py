@@ -1,22 +1,40 @@
-"""App-level meta routes: version, icon, favicon, and API docs."""
+"""App-level meta routes: health, icon, favicon, and API docs."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel
 
 router = APIRouter()
 
 
-@router.get("/version")
-async def version(request: Request) -> dict[str, str]:
-    """Return the application version.
+class HealthResponse(BaseModel):
+    """Response body for ``GET /health``.
+
+    Field names/semantics follow draft-inadarei-api-health-check-06, borrowed
+    for vocabulary only (media type stays ``application/json``).
+    """
+
+    status: str
+    version: str
+    description: str
+    serviceId: str | None = None  # noqa: N815 — draft field name; fleet node_id, added later
+
+
+@router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
+async def health(request: Request) -> HealthResponse:
+    """Return liveness/version info for fleet reachability checks.
 
     Returns:
-        Dict with a single ``version`` key.
+        HealthResponse with a fixed ``pass`` status and the package version.
 
     """
-    return {"version": request.app.version}
+    return HealthResponse(
+        status="pass",
+        version=request.app.version,
+        description=request.app.title,
+    )
 
 
 @router.get("/app-icon")
