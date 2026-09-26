@@ -1,6 +1,6 @@
 [project]
 name = "oqtopus-manager"
-version = "0.1.0"
+version = "0.1.3"
 description = "Local/on-prem management application for OQTOPUS ecosystem"
 readme = "README.md"
 license = "Apache-2.0"
