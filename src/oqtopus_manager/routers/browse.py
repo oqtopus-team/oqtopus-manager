@@ -27,8 +27,8 @@ async def browse(request: Request, path: str = "") -> HTMLResponse:
 
     """
     cfg = _get_config(request)
-    base = pathlib.Path(cfg.default_environment_base_path).resolve()  # noqa: ASYNC240
-    current = pathlib.Path(path).resolve() if path else base  # noqa: ASYNC240
+    base = pathlib.Path(cfg.default_environment_base_path).resolve()  # ruff: ignore[blocking-path-method-in-async-function]
+    current = pathlib.Path(path).resolve() if path else base  # ruff: ignore[blocking-path-method-in-async-function]
 
     try:
         # relative_to() raises ValueError when current is outside base

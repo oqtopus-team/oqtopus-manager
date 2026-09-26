@@ -10,9 +10,9 @@ from oqtopus_manager.routers.cloud_local.log import api_router as log_api_router
 from oqtopus_manager.routers.cloud_local.log import router as log_router
 
 # HTML pages, kept at /cloud-local
-routers = [list_router, detail_router, dotenv_router, log_router]  # noqa: RUF067
+routers = [list_router, detail_router, dotenv_router, log_router]  # ruff: ignore[non-empty-init-module]
 # JSON/Server-Sent Events/download endpoints, under /api/cloud-local
-api_routers = [  # noqa: RUF067
+api_routers = [  # ruff: ignore[non-empty-init-module]
     list_api_router,
     detail_api_router,
     dotenv_api_router,

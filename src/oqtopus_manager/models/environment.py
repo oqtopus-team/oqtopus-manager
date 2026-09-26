@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pathlib  # noqa: TC003
+import pathlib  # ruff: ignore[typing-only-standard-library-import]
 import re
 
 from pydantic import BaseModel, field_validator

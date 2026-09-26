@@ -78,14 +78,14 @@ def build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
     }
 
 
-def build_stream_args(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0917
+def build_stream_args(  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches, too-many-arguments, too-many-positional-arguments]
     cmd: str,
     service: str,
     component: str,
     version: str,
-    foreground: bool,  # noqa: FBT001
+    foreground: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
     status: str,
-    skip_sse_build: bool,  # noqa: FBT001
+    skip_sse_build: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> list[str]:
     """Translate validated query params into oqtopus backend argv.
 
