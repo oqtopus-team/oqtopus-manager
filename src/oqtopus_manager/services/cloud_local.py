@@ -92,7 +92,7 @@ def validate_component(component: str, *, allow_all: bool = False) -> None:
 def build_service_args(
     cmd: str,
     service: str,
-    foreground: bool,  # noqa: FBT001
+    foreground: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> list[str]:
     """Build argv for a service start/stop/restart command.
 
@@ -147,7 +147,7 @@ def build_stream_args(
     service: str,
     component: str,
     version: str,
-    foreground: bool,  # noqa: FBT001
+    foreground: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> list[str]:
     """Translate validated query params into oqtopus cloud-local argv.
 

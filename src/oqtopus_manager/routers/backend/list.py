@@ -80,7 +80,7 @@ async def new_environment_form(request: Request) -> HTMLResponse:
 )
 async def list_environments_json(
     request: Request,
-    include_status: bool = False,  # noqa: FBT001, FBT002
+    include_status: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> JSONResponse:
     """Return every backend environment's info (and optionally status).
 

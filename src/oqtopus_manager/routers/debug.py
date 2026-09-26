@@ -53,7 +53,7 @@ async def debug_page(request: Request) -> HTMLResponse:
     if token:
         try:
             jwt_result = _decode_jwt_without_verification(token)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # ruff: ignore[blind-except]
             jwt_result = {"error": str(e)}
 
     # Compute allowed raw roles (after allow_raw_roles filtering) when patterns are set

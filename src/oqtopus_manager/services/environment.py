@@ -115,7 +115,7 @@ def get_environment_or_404(name: str, cfg: AppConfig) -> Environment:
 async def has_running_services(
     subcommand: str,
     root_dir: pathlib.Path,
-    timeout: float,  # noqa: ASYNC109
+    timeout: float,  # ruff: ignore[async-function-with-timeout]
 ) -> bool:
     """Return True if ``oqtopus <subcommand> status`` reports any running service.
 
@@ -437,7 +437,7 @@ async def _fetch_outcome(coro: Awaitable[BaseModel]) -> Outcome:
     return Outcome(data=result, error=None)
 
 
-async def build_environment_list(  # noqa: PLR0913
+async def build_environment_list(  # ruff: ignore[too-many-arguments]
     cfg: AppConfig,
     environments: list[Environment],
     template: str,

@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from oqtopus_auth.fastapi import require_permission
 
-from oqtopus_manager.routers._file_edit import (  # noqa: TC001 (pydantic body models FastAPI needs at runtime)
+from oqtopus_manager.routers._file_edit import (  # ruff: ignore[typing-only-first-party-import] (pydantic body models FastAPI needs at runtime)
     _SaveBody,
     _UnlockBody,
 )

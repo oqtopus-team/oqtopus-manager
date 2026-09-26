@@ -19,7 +19,7 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     description: str
-    serviceId: str | None = None  # noqa: N815 — draft field name; fleet node_id, added later
+    serviceId: str | None = None  # ruff: ignore[mixed-case-variable-in-class-scope] — draft field name; fleet node_id, added later
 
 
 @router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)

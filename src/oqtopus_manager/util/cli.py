@@ -214,7 +214,7 @@ async def run_oqtopus_subcommand_output(
     subcommand: str,
     args: list[str],
     cwd: pathlib.Path,
-    timeout: float,  # noqa: ASYNC109
+    timeout: float,  # ruff: ignore[async-function-with-timeout]
 ) -> CommandResult:
     """Run ``oqtopus <subcommand> <args>`` in *cwd* and capture stdout/stderr.
 

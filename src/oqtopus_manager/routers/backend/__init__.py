@@ -16,9 +16,9 @@ from oqtopus_manager.routers.backend.service_config import (
 )
 
 # HTML pages, kept at /backend
-routers = [list_router, detail_router, dotenv_router, service_config_router, log_router]  # noqa: RUF067
+routers = [list_router, detail_router, dotenv_router, service_config_router, log_router]  # ruff: ignore[non-empty-init-module]
 # JSON/Server-Sent Events/download endpoints, under /api/backend
-api_routers = [  # noqa: RUF067
+api_routers = [  # ruff: ignore[non-empty-init-module]
     list_api_router,
     detail_api_router,
     dotenv_api_router,

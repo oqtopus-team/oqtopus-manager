@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from oqtopus_auth.fastapi import require_permission
 
-from oqtopus_manager.routers._file_edit import (  # noqa: TC001 (pydantic body models FastAPI needs at runtime)
+from oqtopus_manager.routers._file_edit import (  # ruff: ignore[typing-only-first-party-import] (pydantic body models FastAPI needs at runtime)
     _SaveBody,
     _UnlockBody,
 )
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-def make_dotenv_router(  # noqa: C901, PLR0915
+def make_dotenv_router(  # ruff: ignore[complex-structure, too-many-statements]
     html_url_prefix: str,
     api_url_prefix: str,
     tags: Sequence[str],
@@ -160,7 +160,7 @@ def make_dotenv_router(  # noqa: C901, PLR0915
         "/{name}/dotenv/release-diff",
         dependencies=[require_permission("environment.config.get")],
     )
-    async def dotenv_release_diff(name: str) -> JSONResponse:  # noqa: ARG001
+    async def dotenv_release_diff(name: str) -> JSONResponse:  # ruff: ignore[unused-function-argument]
         content = await env_service.fetch_dotenv_template(release_diff_raw_url)
         return JSONResponse({
             "installed_content": content,

@@ -97,16 +97,16 @@ async def get_environment(request: Request, name: str) -> HTMLResponse:
     "/{name}/stream",
     dependencies=[require_permission("environment.service.manage")],
 )
-async def backend_stream(  # noqa: PLR0913, PLR0917
+async def backend_stream(  # ruff: ignore[too-many-arguments, too-many-positional-arguments]
     request: Request,
     name: str,
     cmd: str,
     service: str = "all",
     component: str = "engine",
     version: str = "",
-    foreground: bool = False,  # noqa: FBT001, FBT002
+    foreground: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
     status: str = "",
-    skip_sse_build: bool = False,  # noqa: FBT001, FBT002
+    skip_sse_build: bool = False,  # ruff: ignore[boolean-type-hint-positional-argument, boolean-default-value-positional-argument]
 ) -> StreamingResponse:
     """Run an oqtopus backend subcommand and stream its output as Server-Sent Events.
 
