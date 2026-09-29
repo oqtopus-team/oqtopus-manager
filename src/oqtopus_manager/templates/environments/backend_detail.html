@@ -59,7 +59,9 @@
     </svg>
     <span class="text-sm font-semibold text-[#4887FA]">Settings</span>
   </summary>
-  {% include "environments/_settings_dl.html" %}
+  <dl id="settings-dl" class="divide-y divide-gray-200">
+    <div class="px-5 py-2 text-sm text-gray-400">Loading…</div>
+  </dl>
 </details>
 
 {# Command cards grid #}
@@ -67,7 +69,7 @@
 
   {# Components | always visible #}
   <details id="card-components" data-sec="sec-components"
-           class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group {% if not all_versions_installed %}lg:col-span-2{% endif %}" open>
+           class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group lg:col-span-2" open>
     <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M9 18l6-6-6-6"/>
@@ -113,16 +115,14 @@
         </div>
       </div>
       <div class="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
-        {% set _engine_version = info.components | selectattr('name', 'equalto', 'engine') | map(attribute='version') | first %}
         <button id="btn-build" onclick="runCmd('build', {}, 'build sse-runtime', this)"
-                class="btn btn-sm btn-outline"
-                {% if not _engine_version %}disabled{% endif %}>Build SSE Runtime</button>
+                class="btn btn-sm btn-outline" disabled>Build SSE Runtime</button>
       </div>
     </div>
   </details>
 
   {# Ops sections: shown only when all three versions are installed #}
-  <div id="ops-sections" style="display: {% if all_versions_installed %}contents{% else %}none{% endif %}">
+  <div id="ops-sections" style="display: none">
 
   {# Device Status #}
   <details data-sec="sec-device" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group" open>
@@ -294,7 +294,7 @@
     <div class="flex justify-end gap-3">
       <button onclick="document.getElementById('delete-modal').classList.add('hidden')" class="btn btn-sm btn-outline">Cancel</button>
       <button
-        onclick="confirmDelete(this, '/api/backend/' + envName)"
+        onclick="confirmDelete(this, '/api/backend/' + envName, '/backend')"
         class="btn btn-sm gap-1.5" style="background:#fff; border:1px solid #dc2626; color:#dc2626;">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
@@ -316,13 +316,14 @@ function showFormError(msg) {
   formError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function confirmDelete(btn, url) {
+function confirmDelete(btn, url, redirectUrl) {
   var originalHtml = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="loading loading-spinner loading-sm"></span> Deleting…';
   fetch(url, { method: 'DELETE' }).then(function (r) {
     if (r.ok) {
-      return r.text().then(function (html) { document.open(); document.write(html); document.close(); });
+      window.location.href = redirectUrl;
+      return;
     }
     return r.json().catch(function () { return {}; }).then(function (body) {
       showFormError(body.detail || 'Failed to delete environment.');
@@ -334,6 +335,7 @@ function confirmDelete(btn, url) {
 }
 
 var envName = {{ env.name | tojson }};
+var resolvedRootPath = {{ resolved_root_path | string | tojson }};
 
 (function () {
   document.querySelectorAll('details[data-sec]').forEach(function (el) {
@@ -363,11 +365,10 @@ var envName = {{ env.name | tojson }};
   document.getElementById('comp').addEventListener('change', syncCompState);
   syncCompState();
 
+  var currentInfo = null;
+
   function updateOpsSections() {
-    var allInstalled = ['engine_version', 'tranqu_version', 'gateway_version'].every(function (key) {
-      var row = document.querySelector('[data-ver="' + key + '"]');
-      return row && row.querySelector('[data-installed]');
-    });
+    var allInstalled = !!(currentInfo && currentInfo.all_installed);
     var opsEl    = document.getElementById('ops-sections');
     var cardComp = document.getElementById('card-components');
     var buildBtn = document.getElementById('btn-build');
@@ -375,13 +376,52 @@ var envName = {{ env.name | tojson }};
     if (opsEl)    opsEl.style.display = allInstalled ? 'contents' : 'none';
     if (cardComp) cardComp.classList.toggle('lg:col-span-2', !allInstalled);
     if (buildBtn) {
-      var hasEngine = !!document.querySelector('[data-ver="engine_version"] [data-installed]');
-      buildBtn.disabled = !hasEngine;
+      var engine = currentInfo && currentInfo.components.filter(function (c) {
+        return c.name === 'engine';
+      })[0];
+      buildBtn.disabled = !(engine && engine.version);
     }
     if (allInstalled && wasHidden) {
       window.fetchStatus(null);
       window.fetchDeviceStatus(null);
     }
+  }
+
+  function renderSettingsDl(info) {
+    var envRoot = info.environment_root || resolvedRootPath;
+    function row(label, valueHtml) {
+      return '<div class="flex items-center px-5 py-2">' +
+        '<dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">' + escapeHtml(label) + '</dt>' +
+        '<dd class="text-sm">' + valueHtml + '</dd>' +
+        '</div>';
+    }
+    var html = '';
+    html += row('environment_root', '<span class="text-gray-800 font-mono">' + escapeHtml(envRoot) + '</span>');
+    html += row('install_root', '<span class="text-gray-800 font-mono">' + (info.install_root ? escapeHtml(info.install_root) : '—') + '</span>');
+    html += row('created_at', '<span class="text-gray-800">' + (info.created_at ? escapeHtml(info.created_at) : '—') + '</span>');
+    info.components.forEach(function (c) {
+      var value;
+      if (c.version) {
+        value = c.kind === 'branch'
+          ? escapeHtml(c.version) + ' (installed at ' + escapeHtml(envRoot) + '/' + escapeHtml(c.name) + ')'
+          : escapeHtml(c.version);
+        value = '<span class="font-mono text-gray-800">' + value + '</span>';
+      } else {
+        value = '<span class="text-red-500">not installed</span>';
+      }
+      html += row(c.name + '_version', value);
+    });
+    document.getElementById('settings-dl').innerHTML = html;
+  }
+
+  function fetchSettings() {
+    return fetch('/api/backend/' + envName)
+      .then(function (r) { return r.json(); })
+      .then(function (info) {
+        currentInfo = info;
+        renderSettingsDl(info);
+        updateOpsSections();
+      });
   }
 
   var terminal      = document.getElementById('terminal');
@@ -403,20 +443,6 @@ var envName = {{ env.name | tojson }};
     btn.disabled = false;
     var sp = btn.querySelector('.loading');
     if (sp) sp.remove();
-  }
-
-  function refreshSettings() {
-    fetch('/backend/' + envName + '/settings-partial')
-      .then(function (r) { return r.text(); })
-      .then(function (html) {
-        var dl = document.getElementById('settings-dl');
-        if (dl) {
-          var tmp = document.createElement('div');
-          tmp.innerHTML = html.trim();
-          dl.replaceWith(tmp.firstElementChild);
-        }
-        updateOpsSections();
-      });
   }
 
   // Parses one SSE "event" (the text between two blank-line delimiters) into
@@ -530,7 +556,7 @@ var envName = {{ env.name | tojson }};
     compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
     startStream('/api/backend/' + envName + '/stream?' + params,
       label, btn,
-      needsRefresh ? refreshSettings : null,
+      needsRefresh ? fetchSettings : null,
       function () {
         compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
         syncCompState();
@@ -742,10 +768,7 @@ var envName = {{ env.name | tojson }};
       .then(function () { window.fetchLocks(null); });
   };
 
-  if (document.getElementById('ops-sections').style.display !== 'none') {
-    window.fetchStatus(null);
-    window.fetchDeviceStatus(null);
-  }
+  fetchSettings();
   window.fetchLocks(null);
   setInterval(function () { window.fetchLocks(null); }, 5000);
 

@@ -191,21 +191,17 @@ async def stream_environment_init(
 
 @api_router.delete(
     "/{name}",
-    response_class=HTMLResponse,
     dependencies=[require_permission("environment.delete")],
 )
-async def delete_environment(request: Request, name: str) -> HTMLResponse:
+async def delete_environment(request: Request, name: str) -> JSONResponse:
     """Delete an environment and its directory.
 
-    Still returns the re-rendered HTML list (HTMX swaps it in), unlike every
-    other /api route: this is a deliberate exception, kept only because the
-    HTML delete button still depends on it.
-
     Returns:
-        HTMLResponse with the updated environments list.
+        JSONResponse ``{"ok": true}``.
 
     Raises:
-        HTTPException: If the environment is not found.
+        HTTPException: If the environment is not found, or if any of its
+            services are still running.
 
     """
     cfg = _get_config(request)
@@ -219,9 +215,4 @@ async def delete_environment(request: Request, name: str) -> HTMLResponse:
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    remaining = [e for e in cfg.load_environments() if e.template == "backend"]
-    return _get_templates(request).TemplateResponse(
-        request,
-        "environments/list.html",
-        backend_service.build_list_context(remaining, cfg),
-    )
+    return JSONResponse({"ok": True})

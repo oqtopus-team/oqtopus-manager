@@ -59,7 +59,9 @@
     </svg>
     <span class="text-sm font-semibold text-[#4887FA]">Settings</span>
   </summary>
-  {% include "environments/_settings_dl.html" %}
+  <dl id="settings-dl" class="divide-y divide-gray-200">
+    <div class="px-5 py-2 text-sm text-gray-400">Loading…</div>
+  </dl>
 </details>
 
 {# Command cards grid #}
@@ -111,7 +113,7 @@
   </details>
 
   {# Ops sections: shown only when all three versions are installed #}
-  <div id="ops-sections" style="display: {% if all_versions_installed %}contents{% else %}none{% endif %}">
+  <div id="ops-sections" style="display: none">
 
   {# Status | full width #}
   <details data-sec="sec-status" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group lg:col-span-2" open>
@@ -262,7 +264,7 @@
     <div class="flex justify-end gap-3">
       <button onclick="document.getElementById('delete-modal').classList.add('hidden')" class="btn btn-sm btn-outline">Cancel</button>
       <button
-        onclick="confirmDelete(this, '/api/cloud-local/' + envName)"
+        onclick="confirmDelete(this, '/api/cloud-local/' + envName, '/cloud-local')"
         class="btn btn-sm gap-1.5" style="background:#fff; border:1px solid #dc2626; color:#dc2626;">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/>
@@ -284,13 +286,14 @@ function showFormError(msg) {
   formError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function confirmDelete(btn, url) {
+function confirmDelete(btn, url, redirectUrl) {
   var originalHtml = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="loading loading-spinner loading-sm"></span> Deleting…';
   fetch(url, { method: 'DELETE' }).then(function (r) {
     if (r.ok) {
-      return r.text().then(function (html) { document.open(); document.write(html); document.close(); });
+      window.location.href = redirectUrl;
+      return;
     }
     return r.json().catch(function () { return {}; }).then(function (body) {
       showFormError(body.detail || 'Failed to delete environment.');
@@ -302,6 +305,7 @@ function confirmDelete(btn, url) {
 }
 
 var envName = {{ env.name | tojson }};
+var resolvedRootPath = {{ resolved_root_path | string | tojson }};
 
 (function () {
   document.querySelectorAll('details[data-sec]').forEach(function (el) {
@@ -326,17 +330,53 @@ var envName = {{ env.name | tojson }};
   document.getElementById('comp').addEventListener('change', syncCompState);
   syncCompState();
 
+  var currentInfo = null;
+
   function updateOpsSections() {
-    var allInstalled = ['cloud_version', 'frontend_version', 'admin_version'].every(function (key) {
-      var row = document.querySelector('[data-ver="' + key + '"]');
-      return row && row.querySelector('[data-installed]');
-    });
+    var allInstalled = !!(currentInfo && currentInfo.all_installed);
     var opsEl    = document.getElementById('ops-sections');
     var wasHidden = opsEl && opsEl.style.display === 'none';
     if (opsEl)    opsEl.style.display = allInstalled ? 'contents' : 'none';
     if (allInstalled && wasHidden) {
       window.fetchStatus(null);
     }
+  }
+
+  function renderSettingsDl(info) {
+    var envRoot = info.environment_root || resolvedRootPath;
+    function row(label, valueHtml) {
+      return '<div class="flex items-center px-5 py-2">' +
+        '<dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">' + escapeHtml(label) + '</dt>' +
+        '<dd class="text-sm">' + valueHtml + '</dd>' +
+        '</div>';
+    }
+    var html = '';
+    html += row('environment_root', '<span class="text-gray-800 font-mono">' + escapeHtml(envRoot) + '</span>');
+    html += row('install_root', '<span class="text-gray-800 font-mono">' + (info.install_root ? escapeHtml(info.install_root) : '—') + '</span>');
+    html += row('created_at', '<span class="text-gray-800">' + (info.created_at ? escapeHtml(info.created_at) : '—') + '</span>');
+    info.components.forEach(function (c) {
+      var value;
+      if (c.version) {
+        value = c.kind === 'branch'
+          ? escapeHtml(c.version) + ' (installed at ' + escapeHtml(envRoot) + '/' + escapeHtml(c.name) + ')'
+          : escapeHtml(c.version);
+        value = '<span class="font-mono text-gray-800">' + value + '</span>';
+      } else {
+        value = '<span class="text-red-500">not installed</span>';
+      }
+      html += row(c.name + '_version', value);
+    });
+    document.getElementById('settings-dl').innerHTML = html;
+  }
+
+  function fetchSettings() {
+    return fetch('/api/cloud-local/' + envName)
+      .then(function (r) { return r.json(); })
+      .then(function (info) {
+        currentInfo = info;
+        renderSettingsDl(info);
+        updateOpsSections();
+      });
   }
 
   var terminal      = document.getElementById('terminal');
@@ -360,19 +400,6 @@ var envName = {{ env.name | tojson }};
     if (sp) sp.remove();
   }
 
-  function refreshSettings() {
-    fetch('/cloud-local/' + envName + '/settings-partial')
-      .then(function (r) { return r.text(); })
-      .then(function (html) {
-        var dl = document.getElementById('settings-dl');
-        if (dl) {
-          var tmp = document.createElement('div');
-          tmp.innerHTML = html.trim();
-          dl.replaceWith(tmp.firstElementChild);
-        }
-        updateOpsSections();
-      });
-  }
 
   // Parses one SSE "event" (the text between two blank-line delimiters) into
   // its {type, data} per the SSE spec: an "event:" line sets the type
@@ -478,7 +505,7 @@ var envName = {{ env.name | tojson }};
     compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
     startStream('/api/cloud-local/' + envName + '/stream?' + params,
       action + ' ' + comp + (ver ? ' ' + ver : ''), btn,
-      needsRefresh ? refreshSettings : null,
+      needsRefresh ? fetchSettings : null,
       function () {
         compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
         syncCompState();
@@ -643,9 +670,7 @@ var envName = {{ env.name | tojson }};
       .then(function () { window.fetchLocks(null); });
   };
 
-  if (document.getElementById('ops-sections').style.display !== 'none') {
-    window.fetchStatus(null);
-  }
+  fetchSettings();
   window.fetchLocks(null);
   setInterval(function () { window.fetchLocks(null); }, 5000);
 

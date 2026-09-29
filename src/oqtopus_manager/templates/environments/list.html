@@ -197,12 +197,18 @@
     document.getElementById('delete-modal-confirm').onclick = function () {
       fetch(_listUrlPrefix + '/' + encodeURIComponent(envName), { method: 'DELETE' })
         .then(function (r) {
+          document.getElementById('delete-modal').classList.add('hidden');
           if (r.ok) {
-            return r.text().then(function (html) { document.open(); document.write(html); document.close(); });
+            var row = document.getElementById('env-row-' + envName);
+            if (row) row.remove();
+            var tbody = document.getElementById('env-list');
+            // The empty-state card is server-rendered and mutually exclusive
+            // with the table; reload to switch to it once the last row is gone.
+            if (tbody && !tbody.children.length) location.reload();
+            return;
           }
           return r.json().catch(function () { return {}; }).then(function (body) {
             showFormError(body.detail || 'Failed to delete environment.');
-            document.getElementById('delete-modal').classList.add('hidden');
           });
         });
     };
