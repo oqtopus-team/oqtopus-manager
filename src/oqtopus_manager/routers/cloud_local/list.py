@@ -166,7 +166,7 @@ async def stream_environment_init(
 
     """
     cfg = _get_config(request)
-    lock = _get_lock_registry(request).env_lock(
+    lock = _get_lock_registry(request).environment_lock(
         name, operation=f"init (template={template})", held_by=_get_held_by(request)
     )
 
@@ -207,7 +207,7 @@ async def delete_environment(request: Request, name: str) -> HTMLResponse:
     registry = _get_lock_registry(request)
     held_by = _get_held_by(request)
     try:
-        async with registry.env_all_and_env_lock(
+        async with registry.all_services_and_environment_lock(
             name, operation="delete", held_by=held_by
         ):
             await env_service.delete_environment(cfg, name, "cloud-local")

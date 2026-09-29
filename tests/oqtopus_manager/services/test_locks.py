@@ -47,16 +47,16 @@ async def test_component_lock_allows_different_components_concurrently() -> None
     assert max_active[0] == 2
 
 
-# ── env_lock ─────────────────────────────────────────────────────────────────
+# ── environment_lock ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.anyio
-async def test_env_lock_serializes_same_environment() -> None:
+async def test_environment_lock_serializes_same_environment() -> None:
     registry = LockRegistry()
     active, max_active = [0], [0]
 
     async def worker() -> None:
-        cm = registry.env_lock("qulacs", operation="install", held_by="u")
+        cm = registry.environment_lock("qulacs", operation="install", held_by="u")
         await _hold(cm, active, max_active, 0.05)
 
     await asyncio.gather(worker(), worker())
@@ -145,9 +145,9 @@ async def test_service_lock_independent_across_environments() -> None:
 
 
 @pytest.mark.anyio
-async def test_component_and_env_lock_releases_both_on_exit() -> None:
+async def test_component_and_environment_lock_releases_both_on_exit() -> None:
     registry = LockRegistry()
-    async with registry.component_and_env_lock(
+    async with registry.component_and_environment_lock(
         "gateway", "qulacs", operation="install", held_by="u"
     ):
         assert len(registry.snapshot()) == 2
@@ -155,7 +155,7 @@ async def test_component_and_env_lock_releases_both_on_exit() -> None:
 
 
 @pytest.mark.anyio
-async def test_all_components_and_env_lock_two_concurrent_calls_complete() -> None:
+async def test_all_components_and_environment_lock_two_concurrent_calls_complete() -> None:
     """Two concurrent "install all" calls must not deadlock: both acquire every
     component lock in the same (sorted) order, so one always fully precedes
     the other rather than each holding a lock the other needs.
@@ -164,7 +164,7 @@ async def test_all_components_and_env_lock_two_concurrent_calls_complete() -> No
     components = ["gateway", "engine", "tranqu"]
 
     async def worker() -> None:
-        async with registry.all_components_and_env_lock(
+        async with registry.all_components_and_environment_lock(
             components, "qulacs", operation="install all", held_by="u"
         ):
             await asyncio.sleep(0.02)
@@ -174,9 +174,9 @@ async def test_all_components_and_env_lock_two_concurrent_calls_complete() -> No
 
 
 @pytest.mark.anyio
-async def test_env_all_and_env_lock_releases_both_on_exit() -> None:
+async def test_all_services_and_environment_lock_releases_both_on_exit() -> None:
     registry = LockRegistry()
-    async with registry.env_all_and_env_lock("qulacs", operation="delete", held_by="u"):
+    async with registry.all_services_and_environment_lock("qulacs", operation="delete", held_by="u"):
         assert len(registry.snapshot()) == 2
     assert registry.snapshot() == []
 
@@ -236,9 +236,9 @@ async def test_force_unlock_unheld_component_returns_false() -> None:
 
 
 @pytest.mark.anyio
-async def test_force_unlock_env_lock() -> None:
+async def test_force_unlock_environment_lock() -> None:
     registry = LockRegistry()
-    async with registry.env_lock("qulacs", operation="op", held_by="u"):
+    async with registry.environment_lock("qulacs", operation="op", held_by="u"):
         assert await registry.force_unlock("environment:qulacs") is True
         assert registry.snapshot() == []
     # The original holder's own release must not raise even though the

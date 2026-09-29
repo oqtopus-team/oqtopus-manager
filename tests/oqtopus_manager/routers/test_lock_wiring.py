@@ -134,7 +134,7 @@ def test_backend_stream_device_status_set_gets_no_lock(
     assert isinstance(kwargs["lock"], contextlib.nullcontext)
 
 
-def test_backend_init_stream_gets_env_lock(
+def test_backend_init_stream_gets_environment_lock(
     backend_client: TestClient, mocker: MockerFixture
 ) -> None:
     mock = _fake_stream(
@@ -183,7 +183,7 @@ def test_cloud_local_stream_versions_gets_no_lock(
     assert isinstance(kwargs["lock"], contextlib.nullcontext)
 
 
-# ── delete (env_all_and_env_lock) ───────────────────────────────────────────
+# ── delete (all_services_and_environment_lock) ──────────────────────────────
 
 
 def test_delete_environment_acquires_and_releases_lock(

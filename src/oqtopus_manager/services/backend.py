@@ -185,14 +185,14 @@ def stream_lock(  # ruff: ignore[too-many-return-statements, too-many-arguments]
         return registry.service_lock(name, scope, operation=operation, held_by=held_by)
     if cmd in {"install", "update"}:
         if component == "all":
-            return registry.all_components_and_env_lock(
+            return registry.all_components_and_environment_lock(
                 list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
             )
-        return registry.component_and_env_lock(
+        return registry.component_and_environment_lock(
             component, name, operation=operation, held_by=held_by
         )
     if cmd == "uninstall":
-        return registry.component_and_env_lock(
+        return registry.component_and_environment_lock(
             component, name, operation=operation, held_by=held_by
         )
     if cmd == "build":
