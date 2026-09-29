@@ -87,19 +87,19 @@ class _NamedLock:
             return True
 
 
-class _EnvServiceScope:
+class _EnvironmentServiceScope:
     """Hierarchical lock for one environment's service operations.
 
     Individual scopes (a service name, or a container-group name) can be
-    held concurrently with each other, but not with the env-wide "all"
-    scope, and not with another holder of the same scope name -- i.e.
-    ``(env, "all")`` conflicts with any ``(env, service)``, while
-    ``(env, "core")`` and ``(env, "gateway")`` don't conflict with each
-    other.
+    held concurrently with each other, but not with the environment-wide
+    "all" scope, and not with another holder of the same scope name -- i.e.
+    ``(environment, "all")`` conflicts with any ``(environment, service)``,
+    while ``(environment, "core")`` and ``(environment, "gateway")`` don't
+    conflict with each other.
     """
 
-    def __init__(self, env: str) -> None:
-        self._env = env
+    def __init__(self, environment: str) -> None:
+        self._environment = environment
         self._condition = asyncio.Condition()
         self._all_info: LockInfo | None = None
         self._active: dict[str, LockInfo] = {}
@@ -113,7 +113,7 @@ class _EnvServiceScope:
                 lambda: self._all_info is None and scope not in self._active
             )
             self._active[scope] = LockInfo(
-                scope=f"{self._env}/{scope}",
+                scope=f"{self._environment}/{scope}",
                 operation=operation,
                 held_by=held_by,
                 acquired_at=time.time(),
@@ -134,7 +134,7 @@ class _EnvServiceScope:
                 lambda: self._all_info is None and not self._active
             )
             self._all_info = LockInfo(
-                scope=f"{self._env}/*",
+                scope=f"{self._environment}/*",
                 operation=operation,
                 held_by=held_by,
                 acquired_at=time.time(),
@@ -184,8 +184,8 @@ class LockRegistry:
 
     def __init__(self) -> None:
         self._components: dict[str, _NamedLock] = {}
-        self._envs: dict[str, _NamedLock] = {}
-        self._env_services: dict[str, _EnvServiceScope] = {}
+        self._environments: dict[str, _NamedLock] = {}
+        self._environment_services: dict[str, _EnvironmentServiceScope] = {}
         # Guards creation of the per-key lock objects above, never held
         # while an actual operation lock is being awaited.
         self._registry_lock = asyncio.Lock()
@@ -196,13 +196,17 @@ class LockRegistry:
                 component, _NamedLock(f"component:{component}")
             )
 
-    async def _env(self, env: str) -> _NamedLock:
+    async def _environment(self, environment: str) -> _NamedLock:
         async with self._registry_lock:
-            return self._envs.setdefault(env, _NamedLock(f"environment:{env}"))
+            return self._environments.setdefault(
+                environment, _NamedLock(f"environment:{environment}")
+            )
 
-    async def _env_service(self, env: str) -> _EnvServiceScope:
+    async def _environment_service(self, environment: str) -> _EnvironmentServiceScope:
         async with self._registry_lock:
-            return self._env_services.setdefault(env, _EnvServiceScope(env))
+            return self._environment_services.setdefault(
+                environment, _EnvironmentServiceScope(environment)
+            )
 
     # ── single-resource locks ────────────────────────────────────────────
 
@@ -216,68 +220,68 @@ class LockRegistry:
             yield
 
     @asynccontextmanager
-    async def env_lock(
-        self, env: str, *, operation: str, held_by: str
+    async def environment_lock(
+        self, environment: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
         """Guard an environment's version binding / directory (R2/R4)."""
-        lock = await self._env(env)
+        lock = await self._environment(environment)
         async with lock.acquire(operation=operation, held_by=held_by):
             yield
 
     @asynccontextmanager
     async def service_lock(
-        self, env: str, scope: str, *, operation: str, held_by: str
+        self, environment: str, scope: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
         """Guard one service (or container-group) within an environment (R3)."""
-        state = await self._env_service(env)
+        state = await self._environment_service(environment)
         async with state.acquire_scope(scope, operation=operation, held_by=held_by):
             yield
 
     @asynccontextmanager
     async def service_lock_all(
-        self, env: str, *, operation: str, held_by: str
+        self, environment: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
         """Guard every service within an environment at once ("start/stop all")."""
-        state = await self._env_service(env)
+        state = await self._environment_service(environment)
         async with state.acquire_all(operation=operation, held_by=held_by):
             yield
 
     # ── combined locks (fixed acquisition order to avoid deadlock) ──────
 
     @asynccontextmanager
-    async def component_and_env_lock(
-        self, component: str, env: str, *, operation: str, held_by: str
+    async def component_and_environment_lock(
+        self, component: str, environment: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
-        """Guard install/uninstall/update: component first, then env, always."""
+        """Guard install/uninstall/update: component first, then environment, always."""
         async with (
             self.component_lock(component, operation=operation, held_by=held_by),
-            self.env_lock(env, operation=operation, held_by=held_by),
+            self.environment_lock(environment, operation=operation, held_by=held_by),
         ):
             yield
 
     @asynccontextmanager
-    async def all_components_and_env_lock(
-        self, components: list[str], env: str, *, operation: str, held_by: str
+    async def all_components_and_environment_lock(
+        self, components: list[str], environment: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
-        """Guard "install all": every component lock (fixed order), then env."""
+        """Guard "install all": every component lock (fixed order), then environment."""
         async with contextlib.AsyncExitStack() as stack:
             for component in sorted(components):
                 await stack.enter_async_context(
                     self.component_lock(component, operation=operation, held_by=held_by)
                 )
             await stack.enter_async_context(
-                self.env_lock(env, operation=operation, held_by=held_by)
+                self.environment_lock(environment, operation=operation, held_by=held_by)
             )
             yield
 
     @asynccontextmanager
-    async def env_all_and_env_lock(
-        self, env: str, *, operation: str, held_by: str
+    async def all_services_and_environment_lock(
+        self, environment: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
-        """Guard environment delete: the whole service hierarchy, then the env lock."""
+        """Guard environment delete: service hierarchy, then the environment lock."""
         async with (
-            self.service_lock_all(env, operation=operation, held_by=held_by),
-            self.env_lock(env, operation=operation, held_by=held_by),
+            self.service_lock_all(environment, operation=operation, held_by=held_by),
+            self.environment_lock(environment, operation=operation, held_by=held_by),
         ):
             yield
 
@@ -291,8 +295,8 @@ class LockRegistry:
 
         """
         infos = [lock.info for lock in self._components.values() if lock.info]
-        infos += [lock.info for lock in self._envs.values() if lock.info]
-        for state in self._env_services.values():
+        infos += [lock.info for lock in self._environments.values() if lock.info]
+        for state in self._environment_services.values():
             infos.extend(state.snapshot())
         return infos
 
@@ -310,10 +314,10 @@ class LockRegistry:
             lock = self._components.get(scope.removeprefix("component:"))
             return await lock.force_release() if lock else False
         if scope.startswith("environment:"):
-            lock = self._envs.get(scope.removeprefix("environment:"))
+            lock = self._environments.get(scope.removeprefix("environment:"))
             return await lock.force_release() if lock else False
-        env, sep, sub = scope.partition("/")
-        state = self._env_services.get(env)
+        environment, sep, sub = scope.partition("/")
+        state = self._environment_services.get(environment)
         if not sep or state is None:
             return False
         return await state.force_release(sub)
