@@ -11,7 +11,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from oqtopus_auth.fastapi import require_permission
 
 from oqtopus_manager.routers._problem import problem_response
-from oqtopus_manager.routers._utils import _get_config, _get_templates
+from oqtopus_manager.routers._utils import (
+    _get_config,
+    _get_held_by,
+    _get_lock_registry,
+    _get_templates,
+)
 from oqtopus_manager.services import cloud_local as cloud_local_service
 from oqtopus_manager.services import environment as env_service
 from oqtopus_manager.services.exceptions import ServiceError
@@ -138,10 +143,27 @@ async def cloud_local_stream(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     cwd = env.resolved_root_path(cfg.default_environment_base_path)
+    operation = f"{' '.join(args)} (environment={name})"
     logger.info("Cloud-local stream: cmd=%s args=%s env=%s", params.cmd, args, name)
 
+    lock = cloud_local_service.stream_lock(
+        _get_lock_registry(request),
+        params.cmd,
+        name,
+        params.service,
+        params.component,
+        operation=operation,
+        held_by=_get_held_by(request),
+    )
+
     async def event_stream() -> AsyncGenerator[str]:
-        async for chunk in stream_oqtopus_subcommand(_SUBCOMMAND, args, cwd):
+        async for chunk in stream_oqtopus_subcommand(
+            _SUBCOMMAND,
+            args,
+            cwd,
+            timeout=cfg.oqtopus_cli_operation_timeout_sec,
+            lock=lock,
+        ):
             yield chunk
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -210,3 +232,55 @@ async def get_component_versions(
     except ServiceError as exc:
         return problem_response(exc)
     return JSONResponse(data.model_dump())
+
+
+@api_router.get(
+    "/{name}/locks",
+    dependencies=[require_permission("environment.service.manage")],
+)
+async def get_locks(request: Request, name: str) -> JSONResponse:  # ruff: ignore[unused-function-argument]
+    """Return every currently-held exclusive operation lock.
+
+    Nested under an environment for URL symmetry with the other routes,
+    but returns the full process-wide snapshot regardless of *name*: a
+    component lock blocking this environment's install may have been
+    acquired by a completely different one, and an operator diagnosing a
+    stuck operation needs to see that too.
+
+    Returns:
+        JSONResponse with a list of {scope, operation, held_by, held_since}.
+
+    """
+    registry = _get_lock_registry(request)
+    return JSONResponse([
+        {
+            "scope": info.scope,
+            "operation": info.operation,
+            "held_by": info.held_by,
+            "held_since": info.held_since,
+        }
+        for info in registry.snapshot()
+    ])
+
+
+@api_router.post(
+    "/{name}/locks/force-unlock",
+    dependencies=[require_permission("environment.service.manage")],
+)
+async def force_unlock_lock(
+    request: Request,
+    name: str,  # ruff: ignore[unused-function-argument]
+    scope: str,
+) -> JSONResponse:
+    """Forcibly clear one lock reported by ``GET .../locks``.
+
+    Does not stop whatever CLI subprocess it belongs to -- see
+    ``LockRegistry.force_unlock`` for the safety trade-off this accepts.
+
+    Returns:
+        JSONResponse ``{"ok": true}`` if *scope* was held (and is now
+        cleared), ``{"ok": false}`` if nothing was held there.
+
+    """
+    freed = await _get_lock_registry(request).force_unlock(scope)
+    return JSONResponse({"ok": freed})

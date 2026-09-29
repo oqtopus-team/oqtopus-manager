@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from fastapi.templating import Jinja2Templates
 
     from oqtopus_manager.config import AppConfig
+    from oqtopus_manager.services.locks import LockRegistry
 
 
 def _get_templates(request: Request) -> Jinja2Templates:
@@ -21,6 +22,22 @@ def _get_templates(request: Request) -> Jinja2Templates:
 
 def _get_config(request: Request) -> AppConfig:
     return request.app.state.config
+
+
+def _get_lock_registry(request: Request) -> LockRegistry:
+    return request.app.state.lock_registry
+
+
+def _get_held_by(request: Request) -> str:
+    """Return the account name to attribute a newly-acquired lock to.
+
+    Returns:
+        ``request.state.user.account``, or "unknown" if unauthenticated
+        (auth disabled, or no user resolved).
+
+    """
+    user = getattr(request.state, "user", None)
+    return user.account if user is not None else "unknown"
 
 
 def _lock_error_response(exc: ServiceError) -> JSONResponse:

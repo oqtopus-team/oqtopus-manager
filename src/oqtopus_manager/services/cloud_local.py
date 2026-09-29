@@ -9,14 +9,22 @@ from oqtopus_manager.services.environment import (
     raise_for_command_result,
 )
 from oqtopus_manager.services.exceptions import InvalidArgumentError
+from oqtopus_manager.services.locks import no_lock
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
-from oqtopus_manager.util.parse import parse_info, parse_status, parse_versions_detailed
+from oqtopus_manager.util.parse import (
+    CONTAINER_SERVICE_NAMES,
+    parse_info,
+    parse_status,
+    parse_versions_detailed,
+)
 
 if TYPE_CHECKING:
     import pathlib
+    from contextlib import AbstractAsyncContextManager
 
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.models.environment import Environment
+    from oqtopus_manager.services.locks import LockRegistry
     from oqtopus_manager.util.cli import CommandResult
     from oqtopus_manager.util.parse import EnvironmentData, StatusData, VersionsData
 
@@ -172,6 +180,46 @@ def build_stream_args(
     raise InvalidArgumentError(msg)
 
 
+def stream_lock(  # ruff: ignore[too-many-arguments]
+    registry: LockRegistry,
+    cmd: str,
+    name: str,
+    service: str,
+    component: str,
+    *,
+    operation: str,
+    held_by: str,
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock that must be held while running *cmd* via the stream dispatcher.
+
+    Mirrors ``services.backend.stream_lock`` -- see its docstring for the
+    scope table. cloud-local has no build/device-status commands.
+
+    Returns:
+        An async context manager -- a real lock, or a no-op for "versions",
+        which needs none.
+
+    """
+    if cmd in _SERVICE_CMDS:
+        if service == "all":
+            return registry.service_lock_all(name, operation=operation, held_by=held_by)
+        scope = "containers" if service in CONTAINER_SERVICE_NAMES else service
+        return registry.service_lock(name, scope, operation=operation, held_by=held_by)
+    if cmd in {"install", "update"}:
+        if component == "all":
+            return registry.all_components_and_env_lock(
+                list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
+            )
+        return registry.component_and_env_lock(
+            component, name, operation=operation, held_by=held_by
+        )
+    if cmd == "uninstall":
+        return registry.component_and_env_lock(
+            component, name, operation=operation, held_by=held_by
+        )
+    return no_lock()
+
+
 async def _run(
     cfg: AppConfig, name: str, args: list[str]
 ) -> tuple[Environment, CommandResult]:
@@ -184,7 +232,7 @@ async def _run(
     env = get_environment_or_404(name, cfg)
     cwd = env.resolved_root_path(cfg.default_environment_base_path)
     result = await run_oqtopus_subcommand_output(
-        _SUBCOMMAND, args, cwd, cfg.oqtopus_cli_timeout_sec
+        _SUBCOMMAND, args, cwd, cfg.oqtopus_cli_read_timeout_sec
     )
     raise_for_command_result(result)
     return env, result

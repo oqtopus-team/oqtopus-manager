@@ -16,8 +16,10 @@ from oqtopus_manager.services.exceptions import (
     InvalidArgumentError,
     TopologyNotConfiguredError,
 )
+from oqtopus_manager.services.locks import no_lock
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
 from oqtopus_manager.util.parse import (
+    CONTAINER_SERVICE_NAMES,
     parse_device_status,
     parse_info,
     parse_status,
@@ -25,8 +27,11 @@ from oqtopus_manager.util.parse import (
 )
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
+
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.models.environment import Environment
+    from oqtopus_manager.services.locks import LockRegistry
     from oqtopus_manager.util.cli import CommandResult
     from oqtopus_manager.util.parse import (
         DeviceStatusData,
@@ -151,6 +156,50 @@ def build_stream_args(  # ruff: ignore[complex-structure, too-many-return-statem
     raise InvalidArgumentError(msg)
 
 
+def stream_lock(  # ruff: ignore[too-many-return-statements, too-many-arguments]
+    registry: LockRegistry,
+    cmd: str,
+    name: str,
+    service: str,
+    component: str,
+    *,
+    operation: str,
+    held_by: str,
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock that must be held while running *cmd* via the stream dispatcher.
+
+    Scopes locks to the smallest resource each operation actually shares:
+    start/stop/restart lock the (env, service); install/update/uninstall
+    lock the component and the env; build locks the "engine" component;
+    device-status-set and versions need no lock at all.
+
+    Returns:
+        An async context manager -- a real lock, or a no-op for operations
+        that don't need one.
+
+    """
+    if cmd in {"start", "stop", "restart"}:
+        if service == "all":
+            return registry.service_lock_all(name, operation=operation, held_by=held_by)
+        scope = "containers" if service in CONTAINER_SERVICE_NAMES else service
+        return registry.service_lock(name, scope, operation=operation, held_by=held_by)
+    if cmd in {"install", "update"}:
+        if component == "all":
+            return registry.all_components_and_env_lock(
+                list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
+            )
+        return registry.component_and_env_lock(
+            component, name, operation=operation, held_by=held_by
+        )
+    if cmd == "uninstall":
+        return registry.component_and_env_lock(
+            component, name, operation=operation, held_by=held_by
+        )
+    if cmd == "build":
+        return registry.component_lock("engine", operation=operation, held_by=held_by)
+    return no_lock()
+
+
 async def _run(
     cfg: AppConfig, name: str, args: list[str]
 ) -> tuple[Environment, CommandResult]:
@@ -163,7 +212,7 @@ async def _run(
     env = get_environment_or_404(name, cfg)
     cwd = env.resolved_root_path(cfg.default_environment_base_path)
     result = await run_oqtopus_subcommand_output(
-        _SUBCOMMAND, args, cwd, cfg.oqtopus_cli_timeout_sec
+        _SUBCOMMAND, args, cwd, cfg.oqtopus_cli_read_timeout_sec
     )
     raise_for_command_result(result)
     return env, result

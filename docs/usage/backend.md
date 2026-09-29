@@ -41,6 +41,10 @@ install` and streams its output the same way environment creation does.
 Once `engine` is installed, **Build SSE Runtime** becomes available. Click it to build the Docker image the
 `sse_engine` service uses to run submitted programs.
 
+!!! note
+    Installing (or building) the same component from two environments at once makes the second one
+    wait for the first to finish — see [Exclusive Locks](locks.md).
+
 ## Start services
 
 With every component installed and built, **Device Status** and **Service Status** appear, and every service

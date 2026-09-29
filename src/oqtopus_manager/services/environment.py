@@ -41,6 +41,7 @@ from oqtopus_manager.util.parse import parse_service_status
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
+    from contextlib import AbstractAsyncContextManager
 
     from oqtopus_manager.config import AppConfig
 
@@ -172,8 +173,14 @@ def validate_new_environment(
         raise EnvironmentValidationError(exc.errors()[0]["msg"]) from exc
 
 
-async def stream_environment_init(
-    cfg: AppConfig, name: str, template: str, root_path: str
+async def stream_environment_init(  # ruff: ignore[too-many-arguments]
+    cfg: AppConfig,
+    name: str,
+    template: str,
+    root_path: str,
+    *,
+    timeout: float | None = None,  # ruff: ignore[async-function-with-timeout]
+    lock: AbstractAsyncContextManager[None] | None = None,
 ) -> AsyncGenerator[str]:
     """Run ``oqtopus init`` and stream its output, saving the environment on success.
 
@@ -191,7 +198,7 @@ async def stream_environment_init(
 
     success = False
     async for chunk in stream_oqtopus_init(
-        name=name, template=template, cwd=parent_dir
+        name=name, template=template, cwd=parent_dir, timeout=timeout, lock=lock
     ):
         yield chunk
         if "event: done\ndata: success" in chunk:
@@ -224,7 +231,7 @@ async def delete_environment(cfg: AppConfig, name: str, subcommand: str) -> None
 
     root_dir = target.resolved_root_path(cfg.default_environment_base_path)
     if root_dir.exists() and await has_running_services(
-        subcommand, root_dir, cfg.oqtopus_cli_timeout_sec
+        subcommand, root_dir, cfg.oqtopus_cli_read_timeout_sec
     ):
         raise ServicesStillRunningError(name)
 

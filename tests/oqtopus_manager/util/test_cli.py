@@ -104,6 +104,84 @@ async def test_stream_command_early_close_cancels_reader_without_killing_process
     assert marker.exists()
 
 
+class _FakeLock:
+    """Records enter/exit for asserting lock lifetime, independent of pytest-mock."""
+
+    def __init__(self) -> None:
+        self.entered = False
+        self.exited = False
+
+    async def __aenter__(self) -> None:
+        self.entered = True
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        self.exited = True
+        return False
+
+
+@pytest.mark.anyio
+async def test_stream_command_lock_held_for_full_process_lifetime(
+    tmp_path: pathlib.Path,
+) -> None:
+    lock = _FakeLock()
+    chunks = await _collect(
+        _stream_command(["echo", "hi"], tmp_path, lock=lock)
+    )
+    assert any("event: done" in c and "success" in c for c in chunks)
+    assert lock.entered is True
+    assert lock.exited is True
+
+
+@pytest.mark.anyio
+async def test_stream_command_lock_survives_early_client_disconnect(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A client disconnect must not release the lock early: the subprocess is
+    left running in the background (see the test above), so the lock must
+    stay held until it actually finishes -- otherwise a second install could
+    start while the orphaned first one is still writing.
+    """
+    lock = _FakeLock()
+    marker = tmp_path / "marker"
+
+    gen = _stream_command(
+        ["bash", "-c", f"echo start; sleep 0.3; touch {marker}"],
+        tmp_path,
+        lock=lock,
+    )
+    async for _chunk in gen:
+        break  # consume exactly one chunk, then abandon the generator
+
+    await gen.aclose()
+    assert lock.entered is True
+    assert lock.exited is False  # not released just because the client left
+
+    await asyncio.sleep(0.5)
+    assert marker.exists()
+    assert lock.exited is True  # released once the background process finished
+
+
+@pytest.mark.anyio
+async def test_stream_command_timeout_kills_process_and_releases_lock(
+    tmp_path: pathlib.Path,
+) -> None:
+    lock = _FakeLock()
+    chunks = await _collect(
+        _stream_command(["sleep", "10"], tmp_path, timeout=0.05, lock=lock)
+    )
+    assert any("event: done" in c and "timeout" in c for c in chunks)
+    assert lock.entered is True
+    assert lock.exited is True
+
+
+@pytest.mark.anyio
+async def test_stream_command_timeout_without_lock_still_kills_process(
+    tmp_path: pathlib.Path,
+) -> None:
+    chunks = await _collect(_stream_command(["sleep", "10"], tmp_path, timeout=0.05))
+    assert any("event: done" in c and "timeout" in c for c in chunks)
+
+
 # ── stream_oqtopus_init ───────────────────────────────────────────────────────
 
 
