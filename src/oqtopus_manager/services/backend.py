@@ -16,7 +16,6 @@ from oqtopus_manager.services.exceptions import (
     InvalidArgumentError,
     TopologyNotConfiguredError,
 )
-from oqtopus_manager.services.locks import no_lock
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
 from oqtopus_manager.util.parse import (
     CONTAINER_SERVICE_NAMES,
@@ -83,121 +82,191 @@ def build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
     }
 
 
-def build_stream_args(  # ruff: ignore[complex-structure, too-many-return-statements, too-many-branches, too-many-arguments, too-many-positional-arguments]
+def build_service_args(
     cmd: str,
     service: str,
-    component: str,
-    version: str,
     foreground: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
-    status: str,
-    skip_sse_build: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
 ) -> list[str]:
-    """Translate validated query params into oqtopus backend argv.
-
-    ``status``/``info``/``device-status-show`` are deliberately not handled
-    here: the UI reads them from the JSON endpoints
-    (GET .../status, .../device-status, .../{name}) instead of this
-    stream dispatcher. ``versions`` stays -- it still backs the console's
-    raw-output display alongside the JSON versions endpoint.
+    """Build argv for a service start/stop/restart command.
 
     Returns:
         List of string arguments to pass to the oqtopus backend CLI.
 
     Raises:
-        InvalidArgumentError: If an invalid service, component, status, or
-            command is provided.
+        InvalidArgumentError: If the service is not recognized.
 
     """
-    if cmd in {"start", "stop", "restart"}:
-        if service not in _VALID_SERVICES:
-            msg = f"Invalid service '{service}'"
-            raise InvalidArgumentError(msg)
-        args = [cmd, service]
-        if cmd == "start" and foreground:
-            args.append("--foreground")
-        return args
-    if cmd == "versions":
-        if component not in _VALID_COMPONENTS:
-            msg = f"Invalid component '{component}'"
-            raise InvalidArgumentError(msg)
-        return ["versions", component]
-    if cmd == "install":
-        comp = component if component in _VALID_COMPONENTS else None
-        if comp is None and component != "all":
-            msg = f"Invalid component '{component}'"
-            raise InvalidArgumentError(msg)
-        args = ["install", component]
-        if component != "all" and version:
-            args.append(version)
-        if skip_sse_build:
-            args.append("--skip-sse-build")
-        return args
-    if cmd == "update":
-        if component not in _VALID_COMPONENTS:
-            msg = f"Invalid component '{component}'"
-            raise InvalidArgumentError(msg)
-        return ["update", component]
-    if cmd == "uninstall":
-        if component not in _VALID_COMPONENTS:
-            msg = f"Invalid component '{component}'"
-            raise InvalidArgumentError(msg)
-        if not version:
-            msg = "version is required for uninstall"
-            raise InvalidArgumentError(msg)
-        return ["uninstall", component, version]
-    if cmd == "build":
-        return ["build", "sse-runtime"]
-    if cmd == "device-status-set":
-        if status not in _VALID_STATUSES:
-            msg = f"Invalid status '{status}'"
-            raise InvalidArgumentError(msg)
-        return ["device-status", status]
-    msg = f"Unknown command '{cmd}'"
-    raise InvalidArgumentError(msg)
+    if service not in _VALID_SERVICES:
+        msg = f"Invalid service '{service}'"
+        raise InvalidArgumentError(msg)
+    args = [cmd, service]
+    if cmd == "start" and foreground:
+        args.append("--foreground")
+    return args
 
 
-def stream_lock(  # ruff: ignore[too-many-return-statements, too-many-arguments]
-    registry: LockRegistry,
-    cmd: str,
-    name: str,
-    service: str,
+def build_install_args(
     component: str,
-    *,
-    operation: str,
-    held_by: str,
-) -> AbstractAsyncContextManager[None]:
-    """Return the lock that must be held while running *cmd* via the stream dispatcher.
-
-    Scopes locks to the smallest resource each operation actually shares:
-    start/stop/restart lock the (env, service); install/update/uninstall
-    lock the component and the env; build locks the "engine" component;
-    device-status-set and versions need no lock at all.
+    version: str,
+    skip_sse_build: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
+) -> list[str]:
+    """Build argv for ``install``.
 
     Returns:
-        An async context manager -- a real lock, or a no-op for operations
-        that don't need one.
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    Raises:
+        InvalidArgumentError: If the component is not recognized.
 
     """
-    if cmd in {"start", "stop", "restart"}:
-        if service == "all":
-            return registry.service_lock_all(name, operation=operation, held_by=held_by)
-        scope = "containers" if service in CONTAINER_SERVICE_NAMES else service
-        return registry.service_lock(name, scope, operation=operation, held_by=held_by)
-    if cmd in {"install", "update"}:
-        if component == "all":
-            return registry.all_components_and_environment_lock(
-                list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
-            )
-        return registry.component_and_environment_lock(
-            component, name, operation=operation, held_by=held_by
+    if component != "all" and component not in _VALID_COMPONENTS:
+        msg = f"Invalid component '{component}'"
+        raise InvalidArgumentError(msg)
+    args = ["install", component]
+    if component != "all" and version:
+        args.append(version)
+    if skip_sse_build:
+        args.append("--skip-sse-build")
+    return args
+
+
+def build_update_args(component: str) -> list[str]:
+    """Build argv for ``update``.
+
+    Returns:
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    Raises:
+        InvalidArgumentError: If the component is not recognized.
+
+    """
+    if component not in _VALID_COMPONENTS:
+        msg = f"Invalid component '{component}'"
+        raise InvalidArgumentError(msg)
+    return ["update", component]
+
+
+def build_uninstall_args(component: str, version: str) -> list[str]:
+    """Build argv for ``uninstall``.
+
+    Returns:
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    Raises:
+        InvalidArgumentError: If the component is not recognized, or version
+            is missing.
+
+    """
+    if component not in _VALID_COMPONENTS:
+        msg = f"Invalid component '{component}'"
+        raise InvalidArgumentError(msg)
+    if not version:
+        msg = "version is required for uninstall"
+        raise InvalidArgumentError(msg)
+    return ["uninstall", component, version]
+
+
+def build_build_sse_runtime_args() -> list[str]:
+    """Build argv for ``build sse-runtime``.
+
+    Returns:
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    """
+    return ["build", "sse-runtime"]
+
+
+def build_device_status_args(status: str) -> list[str]:
+    """Build argv for ``device-status <status>``.
+
+    Returns:
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    Raises:
+        InvalidArgumentError: If the status is not recognized.
+
+    """
+    if status not in _VALID_STATUSES:
+        msg = f"Invalid status '{status}'"
+        raise InvalidArgumentError(msg)
+    return ["device-status", status]
+
+
+def build_versions_args(component: str) -> list[str]:
+    """Build argv for ``versions <component>``.
+
+    Returns:
+        List of string arguments to pass to the oqtopus backend CLI.
+
+    Raises:
+        InvalidArgumentError: If the component is not recognized.
+
+    """
+    if component not in _VALID_COMPONENTS:
+        msg = f"Invalid component '{component}'"
+        raise InvalidArgumentError(msg)
+    return ["versions", component]
+
+
+def service_lock_for(
+    registry: LockRegistry, name: str, service: str, *, operation: str, held_by: str
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock for a start/stop/restart operation.
+
+    Returns:
+        The (environment, service) lock, or the environment-wide lock when
+        service == "all".
+
+    """
+    if service == "all":
+        return registry.service_lock_all(name, operation=operation, held_by=held_by)
+    scope = "containers" if service in CONTAINER_SERVICE_NAMES else service
+    return registry.service_lock(name, scope, operation=operation, held_by=held_by)
+
+
+def install_lock_for(
+    registry: LockRegistry, name: str, component: str, *, operation: str, held_by: str
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock for an install operation.
+
+    Returns:
+        The (component, environment) lock, or every component's lock plus
+        the environment lock when component == "all".
+
+    """
+    if component == "all":
+        return registry.all_components_and_environment_lock(
+            list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
         )
-    if cmd == "uninstall":
-        return registry.component_and_environment_lock(
-            component, name, operation=operation, held_by=held_by
-        )
-    if cmd == "build":
-        return registry.component_lock("engine", operation=operation, held_by=held_by)
-    return no_lock()
+    return registry.component_and_environment_lock(
+        component, name, operation=operation, held_by=held_by
+    )
+
+
+def component_lock_for(
+    registry: LockRegistry, name: str, component: str, *, operation: str, held_by: str
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock for an update/uninstall operation (always one component).
+
+    Returns:
+        The (component, environment) lock.
+
+    """
+    return registry.component_and_environment_lock(
+        component, name, operation=operation, held_by=held_by
+    )
+
+
+def build_sse_runtime_lock(
+    registry: LockRegistry, *, operation: str, held_by: str
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock for ``build sse-runtime`` (guards the "engine" component).
+
+    Returns:
+        The "engine" component lock.
+
+    """
+    return registry.component_lock("engine", operation=operation, held_by=held_by)
 
 
 async def _run(

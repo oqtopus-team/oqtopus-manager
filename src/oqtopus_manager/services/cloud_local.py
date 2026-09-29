@@ -9,7 +9,6 @@ from oqtopus_manager.services.environment import (
     raise_for_command_result,
 )
 from oqtopus_manager.services.exceptions import InvalidArgumentError
-from oqtopus_manager.services.locks import no_lock
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
 from oqtopus_manager.util.parse import (
     CONTAINER_SERVICE_NAMES,
@@ -45,8 +44,6 @@ _VALID_SERVICES = frozenset({
 # to share a string.
 COMPONENTS: tuple[str, ...] = ("cloud", "frontend", "admin")
 _VALID_COMPONENTS = frozenset(COMPONENTS)
-_SERVICE_CMDS = frozenset({"start", "stop", "restart"})
-_COMPONENT_CMDS = frozenset({"versions", "install", "update", "uninstall"})
 
 
 def build_list_context(environments: list[Environment], cfg: AppConfig) -> dict:
@@ -150,74 +147,59 @@ def build_component_args(cmd: str, component: str, version: str) -> list[str]:
     return ["uninstall", component, version]
 
 
-def build_stream_args(
-    cmd: str,
-    service: str,
-    component: str,
-    version: str,
-    foreground: bool,  # ruff: ignore[boolean-type-hint-positional-argument]
-) -> list[str]:
-    """Translate validated query params into oqtopus cloud-local argv.
-
-    ``status``/``info`` are deliberately not handled here: the UI reads
-    them from the JSON endpoints (GET .../status, .../{name}) instead of
-    this stream dispatcher. ``versions`` stays -- it still backs the
-    console's raw-output display alongside the JSON endpoint.
-
-    Returns:
-        List of string arguments to pass to the oqtopus cloud-local CLI.
-
-    Raises:
-        InvalidArgumentError: If an invalid service, component, or command
-            is provided.
-
-    """
-    if cmd in _SERVICE_CMDS:
-        return build_service_args(cmd, service, foreground)
-    if cmd in _COMPONENT_CMDS:
-        return build_component_args(cmd, component, version)
-    msg = f"Unknown command '{cmd}'"
-    raise InvalidArgumentError(msg)
-
-
-def stream_lock(  # ruff: ignore[too-many-arguments]
-    registry: LockRegistry,
-    cmd: str,
-    name: str,
-    service: str,
-    component: str,
-    *,
-    operation: str,
-    held_by: str,
+def service_lock_for(
+    registry: LockRegistry, name: str, service: str, *, operation: str, held_by: str
 ) -> AbstractAsyncContextManager[None]:
-    """Return the lock that must be held while running *cmd* via the stream dispatcher.
+    """Return the lock for a start/stop/restart operation.
 
-    Mirrors ``services.backend.stream_lock`` -- see its docstring for the
-    scope table. cloud-local has no build/device-status commands.
+    Mirrors ``services.backend.service_lock_for``.
 
     Returns:
-        An async context manager -- a real lock, or a no-op for "versions",
-        which needs none.
+        The (environment, service) lock, or the environment-wide lock when
+        service == "all".
 
     """
-    if cmd in _SERVICE_CMDS:
-        if service == "all":
-            return registry.service_lock_all(name, operation=operation, held_by=held_by)
-        scope = "containers" if service in CONTAINER_SERVICE_NAMES else service
-        return registry.service_lock(name, scope, operation=operation, held_by=held_by)
-    if cmd in {"install", "update"}:
-        if component == "all":
-            return registry.all_components_and_environment_lock(
-                list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
-            )
-        return registry.component_and_environment_lock(
-            component, name, operation=operation, held_by=held_by
+    if service == "all":
+        return registry.service_lock_all(name, operation=operation, held_by=held_by)
+    scope = "containers" if service in CONTAINER_SERVICE_NAMES else service
+    return registry.service_lock(name, scope, operation=operation, held_by=held_by)
+
+
+def install_lock_for(
+    registry: LockRegistry, name: str, component: str, *, operation: str, held_by: str
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock for an install operation.
+
+    Mirrors ``services.backend.install_lock_for``.
+
+    Returns:
+        The (component, environment) lock, or every component's lock plus
+        the environment lock when component == "all".
+
+    """
+    if component == "all":
+        return registry.all_components_and_environment_lock(
+            list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
         )
-    if cmd == "uninstall":
-        return registry.component_and_environment_lock(
-            component, name, operation=operation, held_by=held_by
-        )
-    return no_lock()
+    return registry.component_and_environment_lock(
+        component, name, operation=operation, held_by=held_by
+    )
+
+
+def component_lock_for(
+    registry: LockRegistry, name: str, component: str, *, operation: str, held_by: str
+) -> AbstractAsyncContextManager[None]:
+    """Return the lock for an update/uninstall operation (always one component).
+
+    Mirrors ``services.backend.component_lock_for``.
+
+    Returns:
+        The (component, environment) lock.
+
+    """
+    return registry.component_and_environment_lock(
+        component, name, operation=operation, held_by=held_by
+    )
 
 
 async def _run(

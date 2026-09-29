@@ -115,7 +115,7 @@
         </div>
       </div>
       <div class="flex flex-wrap gap-2 pt-3 border-t border-gray-100">
-        <button id="btn-build" onclick="runCmd('build', {}, 'build sse-runtime', this)"
+        <button id="btn-build" onclick="runCmd(this)"
                 class="btn btn-sm btn-outline" disabled>Build SSE Runtime</button>
       </div>
     </div>
@@ -462,7 +462,7 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     return { type: type, data: dataLines.join('\n') };
   }
 
-  function startStream(url, label, btnEl, onSuccess, onFinally) {
+  function startStream(url, label, btnEl, onSuccess, onFinally, fetchOptions) {
     if (currentAbort) currentAbort.abort();
     var abort = new AbortController();
     currentAbort = abort;
@@ -487,7 +487,14 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
       if (typeof onFinally === 'function') onFinally();
     }
 
-    fetch(url, { signal: abort.signal })
+    var opts = { signal: abort.signal };
+    if (fetchOptions && fetchOptions.method) opts.method = fetchOptions.method;
+    if (fetchOptions && fetchOptions.body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(fetchOptions.body);
+    }
+
+    fetch(url, opts)
       .then(function (res) {
         if (!res.ok) {
           return res.json().catch(function () { return {}; }).then(function (body) {
@@ -533,34 +540,37 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
       });
   }
 
-  window.runCmd = function (cmd, extra, label, btn) {
-    var params = new URLSearchParams(Object.assign({ cmd: cmd }, extra));
-    startStream('/api/backend/' + envName + '/stream?' + params, label, btn);
+  window.runCmd = function (btn) {
+    startStream('/api/backend/' + envName + '/build-sse-runtime', 'build sse-runtime', btn,
+      null, null, { method: 'POST' });
   };
   window.runServiceCmdFor = function (action, svc, btn) {
-    var params = new URLSearchParams({ cmd: action, service: svc });
-    startStream('/api/backend/' + envName + '/stream?' + params, action + ' ' + svc, btn,
-      function () { window.fetchStatus(null); });
+    var url = '/api/backend/' + envName + '/services/' + encodeURIComponent(svc) + '/' + action;
+    var body = action === 'start' ? { foreground: false } : undefined;
+    startStream(url, action + ' ' + svc, btn,
+      function () { window.fetchStatus(null); }, null,
+      { method: 'POST', body: body });
   };
   window.runComponentCmd = function (action, btn) {
     var comp = document.getElementById('comp').value;
     var ver  = document.getElementById('ver').value.trim();
     var skipSseBuild = action === 'install' && comp === 'engine'
       && document.getElementById('chk-skip-sse-build').checked;
-    var params = new URLSearchParams({ cmd: action, component: comp });
-    if (ver) params.set('version', ver);
-    if (skipSseBuild) params.set('skip_sse_build', 'true');
     var label = action + ' ' + comp + (ver ? ' ' + ver : '') + (skipSseBuild ? ' --skip-sse-build' : '');
     var needsRefresh = (action === 'install' || action === 'update' || action === 'uninstall');
     var compBtnIds = ['btn-versions', 'btn-install', 'btn-uninstall'];
     compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
-    startStream('/api/backend/' + envName + '/stream?' + params,
-      label, btn,
+    var url = '/api/backend/' + envName + '/components/' + encodeURIComponent(comp) + '/' + action;
+    var body;
+    if (action === 'install') body = { version: ver, skip_sse_build: skipSseBuild };
+    else if (action === 'uninstall') body = { version: ver };
+    startStream(url, label, btn,
       needsRefresh ? fetchSettings : null,
       function () {
         compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
         syncCompState();
-      });
+      },
+      { method: 'POST', body: body });
   };
 
   var _VALID_COMP = new Set({{ components | tojson }});
@@ -568,8 +578,8 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   window.fetchVersions = function (btn) {
     var comp = document.getElementById('comp').value;
     if (!_VALID_COMP.has(comp)) return;
-    var params = new URLSearchParams({ cmd: 'versions', component: comp });
-    startStream('/api/backend/' + envName + '/stream?' + params, 'versions ' + comp, btn);
+    startStream('/api/backend/' + envName + '/components/' + encodeURIComponent(comp) + '/versions/stream',
+      'versions ' + comp, btn);
     fetch('/api/backend/' + envName + '/components/' + encodeURIComponent(comp) + '/versions')
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -701,9 +711,9 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   };
 
   window.setDeviceStatus = function (status, btn) {
-    var params = new URLSearchParams({ cmd: 'device-status-set', status: status });
-    startStream('/api/backend/' + envName + '/stream?' + params, 'device-status ' + status, btn,
-      function () { window.fetchDeviceStatus(null); });
+    startStream('/api/backend/' + envName + '/device-status', 'device-status ' + status, btn,
+      function () { window.fetchDeviceStatus(null); }, null,
+      { method: 'POST', body: { status: status } });
   };
 
   function renderLocksTable(locks) {

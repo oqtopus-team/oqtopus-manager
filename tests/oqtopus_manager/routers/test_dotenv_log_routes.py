@@ -45,8 +45,8 @@ _CONFIG = {
             "operator": [
                 "environment.get", "environment.create", "environment.delete",
                 "environment.config.get", "environment.config.update",
-                "environment.log.get", "environment.service.manage",
-                "environment.component.manage", "app_settings.get",
+                "environment.log.get", "environment.service.control",
+                "environment.component.manage", "environment.locks.manage", "app_settings.get",
             ],
             "admin": ["app_settings.update"],
         },

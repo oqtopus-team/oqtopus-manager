@@ -113,8 +113,10 @@ equivalent directly — either works, since both act on the same underlying set 
     Use it only after confirming with `GET .../locks` that the holder is actually stuck, not just
     slow.
 
-These endpoints, and the Force unlock button, require the same permission as the operation they
-cover (`environment.service.manage` — see [Permissions](permissions.md)).
+Viewing locks only requires `environment.get`, the same read-only permission as the rest of an
+environment's status. The Force unlock button (and `POST .../locks/force-unlock` directly) requires
+`environment.locks.manage`, a dedicated permission separate from the operations it may unblock —
+see [Permissions](permissions.md).
 
 ## Limitations
 

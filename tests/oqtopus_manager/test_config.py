@@ -42,8 +42,8 @@ def _write_config(config_dir: pathlib.Path, envs_path: str = "./environments.yam
             "operator": [
                 "environment.get", "environment.create", "environment.delete",
                 "environment.config.get", "environment.config.update",
-                "environment.log.get", "environment.service.manage",
-                "environment.component.manage", "app_settings.get",
+                "environment.log.get", "environment.service.control",
+                "environment.component.manage", "environment.locks.manage", "app_settings.get",
             ],
             "admin": ["app_settings.update"],
         },
@@ -103,8 +103,8 @@ def test_host_port_custom(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatc
             "operator": [
                 "environment.get", "environment.create", "environment.delete",
                 "environment.config.get", "environment.config.update",
-                "environment.log.get", "environment.service.manage",
-                "environment.component.manage", "app_settings.get",
+                "environment.log.get", "environment.service.control",
+                "environment.component.manage", "environment.locks.manage", "app_settings.get",
             ],
             "admin": ["app_settings.update"],
         },

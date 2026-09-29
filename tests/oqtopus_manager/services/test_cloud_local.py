@@ -7,8 +7,9 @@ import pytest
 from oqtopus_manager.services.cloud_local import (
     build_component_args,
     build_service_args,
-    build_stream_args,
-    stream_lock,
+    component_lock_for,
+    install_lock_for,
+    service_lock_for,
     validate_component,
 )
 from oqtopus_manager.services.exceptions import InvalidArgumentError
@@ -81,35 +82,12 @@ class TestBuildComponentArgs:
             build_component_args("uninstall", "cloud", "")
 
 
-class TestCloudLocalBuildStreamArgs:
-    def test_status_and_info_are_no_longer_dispatchable(self) -> None:
-        # Read-only cmds moved to JSON endpoints; the dispatcher must reject
-        # them now rather than silently pass through.
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            build_stream_args("status", "all", "cloud", "", False)
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            build_stream_args("info", "all", "cloud", "", False)
-
-    def test_start_delegates_to_service_args(self) -> None:
-        assert build_stream_args("start", "db", "cloud", "", False) == ["start", "db"]
-
-    def test_versions_delegates_to_component_args(self) -> None:
-        assert build_stream_args("versions", "all", "cloud", "", False) == [
-            "versions",
-            "cloud",
-        ]
-
-    def test_unknown_command_raises(self) -> None:
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            build_stream_args("bogus", "all", "cloud", "", False)
-
-
-class TestStreamLock:
+class TestServiceLockFor:
     @pytest.mark.anyio
     async def test_start_db_locks_container_group(self) -> None:
         registry = LockRegistry()
-        async with stream_lock(
-            registry, "start", "cloud", "db", "cloud", operation="op", held_by="u"
+        async with service_lock_for(
+            registry, "cloud", "db", operation="op", held_by="u"
         ):
             [info] = registry.snapshot()
             assert info.scope == "cloud/containers"
@@ -117,26 +95,28 @@ class TestStreamLock:
     @pytest.mark.anyio
     async def test_start_worker_locks_own_service_name(self) -> None:
         registry = LockRegistry()
-        async with stream_lock(
-            registry, "start", "cloud", "worker", "cloud", operation="op", held_by="u"
+        async with service_lock_for(
+            registry, "cloud", "worker", operation="op", held_by="u"
         ):
             [info] = registry.snapshot()
             assert info.scope == "cloud/worker"
 
     @pytest.mark.anyio
-    async def test_start_all_locks_env_wide(self) -> None:
+    async def test_all_locks_env_wide(self) -> None:
         registry = LockRegistry()
-        async with stream_lock(
-            registry, "start", "cloud", "all", "cloud", operation="op", held_by="u"
+        async with service_lock_for(
+            registry, "cloud", "all", operation="op", held_by="u"
         ):
             [info] = registry.snapshot()
             assert info.scope == "cloud/*"
 
+
+class TestInstallLockFor:
     @pytest.mark.anyio
-    async def test_install_all_locks_every_component_and_env(self) -> None:
+    async def test_all_locks_every_component_and_env(self) -> None:
         registry = LockRegistry()
-        async with stream_lock(
-            registry, "install", "cloud", "all", "all", operation="op", held_by="u"
+        async with install_lock_for(
+            registry, "cloud", "all", operation="op", held_by="u"
         ):
             scopes = {info.scope for info in registry.snapshot()}
             assert scopes == {
@@ -146,19 +126,13 @@ class TestStreamLock:
                 "environment:cloud",
             }
 
+
+class TestComponentLockFor:
     @pytest.mark.anyio
-    async def test_uninstall_locks_component_and_env(self) -> None:
+    async def test_locks_component_and_env(self) -> None:
         registry = LockRegistry()
-        async with stream_lock(
-            registry, "uninstall", "cloud", "all", "admin", operation="op", held_by="u"
+        async with component_lock_for(
+            registry, "cloud", "admin", operation="op", held_by="u"
         ):
             scopes = {info.scope for info in registry.snapshot()}
             assert scopes == {"component:admin", "environment:cloud"}
-
-    @pytest.mark.anyio
-    async def test_versions_needs_no_lock(self) -> None:
-        registry = LockRegistry()
-        async with stream_lock(
-            registry, "versions", "cloud", "all", "cloud", operation="op", held_by="u"
-        ):
-            assert registry.snapshot() == []

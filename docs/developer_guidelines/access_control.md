@@ -299,9 +299,10 @@ Follow the `<resource>.<action>` or `<resource>.<sub-resource>.<action>` format.
 | `create` | Create a new resource |
 | `update` | Modify an existing resource |
 | `delete` | Remove a resource |
-| `manage` | Operational control of a sub-resource |
+| `control` | Operational control over a resource's live state |
+| `manage` | Lifecycle management of a sub-resource |
 
-**Examples:** `environment.get`, `environment.config.update`, `environment.service.manage`
+**Examples:** `environment.get`, `environment.config.update`, `environment.service.control`
 
 ## Choosing between the two approaches
 

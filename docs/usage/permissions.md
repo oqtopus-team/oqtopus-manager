@@ -38,7 +38,8 @@ For implementation details and a full comparison, see
 | `create` | Create a new resource | new form, submit create, init stream |
 | `update` | Modify an existing resource | save edited file, change settings |
 | `delete` | Remove a resource | delete environment |
-| `manage` | Operational control of a sub-resource | start/stop services, install components |
+| `control` | Operational control over a resource's live state | start/stop/restart services, set device status |
+| `manage` | Lifecycle management of a sub-resource | install/uninstall/update components, force-unlock a lock |
 
 ### Format
 
@@ -47,7 +48,7 @@ For implementation details and a full comparison, see
 <resource>.<sub-resource>.<action>
 ```
 
-**Examples:** `environment.get`, `environment.config.update`, `environment.service.manage`
+**Examples:** `environment.get`, `environment.config.update`, `environment.service.control`
 
 ## Permission list
 
@@ -57,14 +58,15 @@ Adding or removing a permission requires a code change.
 
 | Permission | Description |
 |---|---|
-| `environment.get` | View environment list, detail, settings, and component versions |
+| `environment.get` | View environment list, detail, settings, component versions, and locks |
 | `environment.create` | Create a new environment (form, submit, init stream) |
 | `environment.delete` | Delete an environment |
 | `environment.config.get` | View `.env`, service config, and topology JSON files |
 | `environment.config.update` | Edit and save configuration files |
 | `environment.log.get` | View, stream, and download service logs |
-| `environment.component.manage` | Manage components: install, uninstall, update, versions, build |
-| `environment.service.manage` | Control services: start, stop, restart, status, info |
+| `environment.service.control` | Control services: start, stop, restart, and device status |
+| `environment.component.manage` | Manage components: install, uninstall, update, and build SSE runtime |
+| `environment.locks.manage` | Force-unlock a stuck operation lock |
 | `app_settings.get` | View OQTOPUS Manager configuration |
 | `app_settings.update` | Edit OQTOPUS Manager configuration *(admin only)* |
 
@@ -87,8 +89,9 @@ every permission `operator` holds is also held by `admin`, plus `admin` gains
 | `environment.config.get` | ✓ | ✓ |
 | `environment.config.update` | ✓ | ✓ |
 | `environment.log.get` | ✓ | ✓ |
-| `environment.service.manage` | ✓ | ✓ |
+| `environment.service.control` | ✓ | ✓ |
 | `environment.component.manage` | ✓ | ✓ |
+| `environment.locks.manage` | ✓ | ✓ |
 | `app_settings.get` | ✓ | ✓ |
 | `app_settings.update` | | ✓ |
 
