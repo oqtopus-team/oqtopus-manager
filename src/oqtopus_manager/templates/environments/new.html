@@ -142,7 +142,24 @@
   const consoleStatus = document.getElementById("console-status");
   const consoleFooter = document.getElementById("console-footer");
   const consoleMessage = document.getElementById("console-message");
-  let currentEs = null;
+  let currentAbort = null;
+
+  // Parses one SSE "event" (the text between two blank-line delimiters) into
+  // its {type, data} per the SSE spec: an "event:" line sets the type
+  // (default "message"), "data:" lines are joined with "\n", and exactly one
+  // leading space after the colon is stripped (not the whole line).
+  function parseSseEvent(rawEvent) {
+    let type = "message";
+    const dataLines = [];
+    rawEvent.split("\n").forEach(function (line) {
+      if (line.indexOf("event:") === 0) {
+        type = line.slice(6).trim();
+      } else if (line.indexOf("data:") === 0) {
+        dataLines.push(line.slice(5).replace(/^ /, ""));
+      }
+    });
+    return { type: type, data: dataLines.join("\n") };
+  }
 
   function showFormError(msg) {
     formErrorText.textContent = msg;
@@ -188,7 +205,9 @@
   };
 
   function startStream(name, template, rootPath, apiUrlPrefix, htmlUrlPrefix) {
-    if (currentEs) currentEs.close();
+    if (currentAbort) currentAbort.abort();
+    const abort = new AbortController();
+    currentAbort = abort;
 
     consoleArea.classList.remove("hidden");
     terminal.textContent = "";
@@ -198,49 +217,85 @@
     consoleFooter.classList.add("hidden");
     consoleArea.scrollIntoView({ behavior: "smooth", block: "nearest" });
 
-    const params = new URLSearchParams({ name, template, root_path: rootPath });
-    currentEs = new EventSource(apiUrlPrefix + "/stream?" + params.toString());
-
-    currentEs.onmessage = function (e) {
-      appendLine(e.data);
-    };
-
-    currentEs.addEventListener("done", function (e) {
-      currentEs.close();
-      currentEs = null;
+    function finishSuccess() {
+      if (abort !== currentAbort) return; // superseded by a newer stream
+      currentAbort = null;
       setLoading(false);
-      if (e.data === "success") {
-        appendLine("");
-        appendLine("✓ Done.");
-        consoleStatus.textContent = "Done";
-        consoleStatus.className = "text-xs font-semibold text-green-600";
-        consoleFooter.classList.remove("hidden");
-        consoleMessage.innerHTML = 'Completed successfully. <a href="' + htmlUrlPrefix + '/' + encodeURIComponent(name) + '" class="btn btn-primary btn-outline btn-sm ml-2">'
-          + 'Open ' + name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-          + '</a>';
-        consoleMessage.className = "text-sm text-green-700 flex items-center";
-      } else {
-        appendLine("");
-        appendLine("✗ Failed.");
-        consoleStatus.textContent = "Failed";
-        consoleStatus.className = "text-xs text-red-500 font-semibold";
-        consoleFooter.classList.remove("hidden");
-        consoleMessage.textContent = "Failed. Check the output above and try again.";
-        consoleMessage.className = "text-sm text-red-600";
-      }
-    });
+      appendLine("");
+      appendLine("✓ Done.");
+      consoleStatus.textContent = "Done";
+      consoleStatus.className = "text-xs font-semibold text-green-600";
+      consoleFooter.classList.remove("hidden");
+      consoleMessage.innerHTML = 'Completed successfully. <a href="' + htmlUrlPrefix + '/' + encodeURIComponent(name) + '" class="btn btn-primary btn-outline btn-sm ml-2">'
+        + 'Open ' + name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        + '</a>';
+      consoleMessage.className = "text-sm text-green-700 flex items-center";
+    }
 
-    currentEs.onerror = function () {
-      currentEs.close();
-      currentEs = null;
+    function finishFailure() {
+      if (abort !== currentAbort) return; // superseded by a newer stream
+      currentAbort = null;
       setLoading(false);
-      appendLine("✗ Connection lost.");
+      appendLine("");
+      appendLine("✗ Failed.");
+      consoleStatus.textContent = "Failed";
+      consoleStatus.className = "text-xs text-red-500 font-semibold";
+      consoleFooter.classList.remove("hidden");
+      consoleMessage.textContent = "Failed. Check the output above and try again.";
+      consoleMessage.className = "text-sm text-red-600";
+    }
+
+    function finishError(message) {
+      if (abort !== currentAbort) return; // superseded by a newer stream
+      currentAbort = null;
+      setLoading(false);
+      appendLine("✗ " + message);
       consoleStatus.textContent = "Error";
       consoleStatus.className = "text-xs text-red-500 font-semibold";
       consoleFooter.classList.remove("hidden");
-      consoleMessage.textContent = "Connection lost.";
+      consoleMessage.textContent = message;
       consoleMessage.className = "text-sm text-red-600";
-    };
+    }
+
+    const params = new URLSearchParams({ name, template, root_path: rootPath });
+    fetch(apiUrlPrefix + "/stream?" + params.toString(), { signal: abort.signal })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (body) {
+            throw new Error(body.detail || ("Request failed (" + res.status + ")"));
+          });
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        function pump() {
+          return reader.read().then(function (result) {
+            if (result.done) {
+              // Stream closed without ever sending a "done" SSE event.
+              finishError("Connection lost.");
+              return;
+            }
+            buffer += decoder.decode(result.value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf("\n\n")) >= 0) {
+              const evt = parseSseEvent(buffer.slice(0, idx));
+              buffer = buffer.slice(idx + 2);
+              if (evt.type === "done") {
+                if (evt.data === "success") finishSuccess(); else finishFailure();
+                return;
+              }
+              appendLine(evt.data);
+            }
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") return; // superseded; stay silent
+        finishError((err && err.message) || "Connection lost.");
+      });
   }
 
   form.addEventListener("submit", async function (e) {

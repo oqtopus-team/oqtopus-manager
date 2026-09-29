@@ -343,7 +343,7 @@ var envName = {{ env.name | tojson }};
   var consoleArea   = document.getElementById('console-area');
   var consoleCmd    = document.getElementById('console-cmd');
   var consoleStatus = document.getElementById('console-status');
-  var currentEs     = null;
+  var currentAbort  = null;
   var activeBtn     = null;
 
   function setBtnLoading(btn) {
@@ -374,8 +374,27 @@ var envName = {{ env.name | tojson }};
       });
   }
 
+  // Parses one SSE "event" (the text between two blank-line delimiters) into
+  // its {type, data} per the SSE spec: an "event:" line sets the type
+  // (default "message"), "data:" lines are joined with "\n", and exactly one
+  // leading space after the colon is stripped (not the whole line).
+  function parseSseEvent(rawEvent) {
+    var type = 'message';
+    var dataLines = [];
+    rawEvent.split('\n').forEach(function (line) {
+      if (line.indexOf('event:') === 0) {
+        type = line.slice(6).trim();
+      } else if (line.indexOf('data:') === 0) {
+        dataLines.push(line.slice(5).replace(/^ /, ''));
+      }
+    });
+    return { type: type, data: dataLines.join('\n') };
+  }
+
   function startStream(url, label, btnEl, onSuccess, onFinally) {
-    if (currentEs) currentEs.close();
+    if (currentAbort) currentAbort.abort();
+    var abort = new AbortController();
+    currentAbort = abort;
     resetBtn(activeBtn);
     activeBtn = btnEl;
     setBtnLoading(btnEl);
@@ -387,27 +406,60 @@ var envName = {{ env.name | tojson }};
     consoleStatus.className = 'text-xs text-gray-400';
     consoleArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
-    currentEs = new EventSource(url);
-    currentEs.onmessage = function (e) {
-      terminal.textContent += e.data + '\n';
-      terminal.scrollTop = terminal.scrollHeight;
-    };
-    currentEs.addEventListener('done', function (e) {
-      currentEs.close(); currentEs = null;
+    function finish(ok, statusText) {
+      if (abort !== currentAbort) return; // superseded by a newer stream
+      currentAbort = null;
       resetBtn(activeBtn); activeBtn = null;
-      var ok = e.data === 'success';
-      consoleStatus.textContent = ok ? 'Done' : 'Failed';
+      consoleStatus.textContent = statusText;
       consoleStatus.className = 'text-xs font-semibold ' + (ok ? 'text-green-600' : 'text-red-500');
       if (ok && typeof onSuccess === 'function') onSuccess();
       if (typeof onFinally === 'function') onFinally();
-    });
-    currentEs.onerror = function () {
-      currentEs.close(); currentEs = null;
-      resetBtn(activeBtn); activeBtn = null;
-      consoleStatus.textContent = 'Connection error';
-      consoleStatus.className = 'text-xs text-red-500 font-semibold';
-      if (typeof onFinally === 'function') onFinally();
-    };
+    }
+
+    fetch(url, { signal: abort.signal })
+      .then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (body) {
+            throw new Error(body.detail || ('Request failed (' + res.status + ')'));
+          });
+        }
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        function pump() {
+          return reader.read().then(function (result) {
+            if (result.done) {
+              // Stream closed without ever sending a "done" SSE event.
+              finish(false, 'Connection error');
+              return;
+            }
+            buffer += decoder.decode(result.value, { stream: true });
+            var idx;
+            while ((idx = buffer.indexOf('\n\n')) >= 0) {
+              var evt = parseSseEvent(buffer.slice(0, idx));
+              buffer = buffer.slice(idx + 2);
+              if (evt.type === 'done') {
+                finish(evt.data === 'success', evt.data === 'success' ? 'Done' : 'Failed');
+                return;
+              }
+              terminal.textContent += evt.data + '\n';
+              terminal.scrollTop = terminal.scrollHeight;
+            }
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function (err) {
+        if (err && err.name === 'AbortError') return; // superseded; stay silent
+        if (abort !== currentAbort) return;
+        currentAbort = null;
+        resetBtn(activeBtn); activeBtn = null;
+        consoleStatus.textContent = (err && err.message) || 'Connection error';
+        consoleStatus.className = 'text-xs text-red-500 font-semibold';
+        if (typeof onFinally === 'function') onFinally();
+      });
   }
 
   window.runServiceCmdFor = function (action, svc, btn) {
