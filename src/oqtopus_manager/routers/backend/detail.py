@@ -33,41 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 @router.get(
-    "/{name}/settings-partial",
-    response_class=HTMLResponse,
-    dependencies=[require_permission("environment.get")],
-)
-async def get_settings_partial(request: Request, name: str) -> HTMLResponse:
-    """Return the settings partial HTML for the given environment.
-
-    Returns:
-        HTMLResponse with the settings partial template.
-
-    Raises:
-        HTTPException: If the environment is not found.
-
-    """
-    cfg = _get_config(request)
-    try:
-        env = env_service.get_environment_or_404(name, cfg)
-        info = await backend_service.get_info(cfg, name)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    resolved = env.resolved_root_path(cfg.default_environment_base_path)
-    return _get_templates(request).TemplateResponse(
-        request,
-        "environments/_settings_dl.html",
-        {"info": info, "resolved_root_path": resolved},
-    )
-
-
-@router.get(
     "/{name}",
     response_class=HTMLResponse,
     dependencies=[require_permission("environment.get")],
 )
 async def get_environment(request: Request, name: str) -> HTMLResponse:
     """Render the environment detail page.
+
+    Deliberately does not call ``info`` (a CLI subprocess): the page renders
+    immediately from ``environments.yaml`` alone, and the client fetches
+    ``GET /api/backend/{name}`` after load to fill in settings and toggle the
+    ops sections, matching the list page's existing pattern.
 
     Returns:
         HTMLResponse with the environment detail page.
@@ -79,15 +55,12 @@ async def get_environment(request: Request, name: str) -> HTMLResponse:
     cfg = _get_config(request)
     try:
         env = env_service.get_environment_or_404(name, cfg)
-        info = await backend_service.get_info(cfg, name)
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     resolved = env.resolved_root_path(cfg.default_environment_base_path)
     ctx: dict = {
         "env": env,
         "resolved_root_path": resolved,
-        "info": info,
-        "all_versions_installed": info.all_installed,
         "components": backend_service.COMPONENTS,
     }
     return _get_templates(request).TemplateResponse(

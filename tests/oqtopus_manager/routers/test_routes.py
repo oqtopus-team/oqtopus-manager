@@ -86,24 +86,6 @@ def mock_stream_failure(mocker: MockerFixture) -> None:
     mocker.patch("oqtopus_manager.services.environment.stream_oqtopus_init", side_effect=_gen)
 
 
-@pytest.fixture
-def mock_backend_info_empty(mocker: MockerFixture) -> None:
-    """Mock `oqtopus backend info` (used by the detail/settings-partial pages)."""
-    mocker.patch(
-        "oqtopus_manager.services.backend.run_oqtopus_subcommand_output",
-        return_value=CommandResult(returncode=0, stdout="", stderr=""),
-    )
-
-
-@pytest.fixture
-def mock_cloud_local_info_empty(mocker: MockerFixture) -> None:
-    """Mock `oqtopus cloud-local info` (used by the detail/settings-partial pages)."""
-    mocker.patch(
-        "oqtopus_manager.services.cloud_local.run_oqtopus_subcommand_output",
-        return_value=CommandResult(returncode=0, stdout="", stderr=""),
-    )
-
-
 def test_root_redirects_to_backend(client: TestClient) -> None:
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 307
@@ -151,9 +133,10 @@ def test_stream_failure_does_not_save_environment(client: TestClient, mock_strea
     assert b"demo" not in list_response.content
 
 
-def test_get_environment_detail(
-    client: TestClient, mock_stream_success: None, mock_backend_info_empty: None
-) -> None:
+def test_get_environment_detail(client: TestClient, mock_stream_success: None) -> None:
+    """Renders without calling ``info`` (no CLI mock needed): the client
+    fetches ``GET /api/backend/{name}`` after load instead.
+    """
     client.get("/api/backend/stream?name=demo&template=backend")
     response = client.get("/backend/demo")
     assert response.status_code == 200
@@ -180,7 +163,7 @@ def test_delete_environment(
     )
     response = client.request("DELETE", "/api/backend/myenv")
     assert response.status_code == 200
-    assert b"myenv" not in response.content
+    assert response.json() == {"ok": True}
     assert not env_dir.exists()
 
 
@@ -350,10 +333,11 @@ def test_cloud_local_stream_success_saves_environment(
 
 
 def test_cloud_local_get_environment_detail(
-    cloud_local_client: TestClient,
-    mock_cl_stream_success: None,
-    mock_cloud_local_info_empty: None,
+    cloud_local_client: TestClient, mock_cl_stream_success: None
 ) -> None:
+    """Renders without calling ``info`` (no CLI mock needed): the client
+    fetches ``GET /api/cloud-local/{name}`` after load instead.
+    """
     cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
     resp = cloud_local_client.get("/cloud-local/cl-demo")
     assert resp.status_code == 200
@@ -418,21 +402,7 @@ def test_cloud_local_delete_blocked_while_running(
     assert env_dir.exists()
 
 
-# ── backend detail (settings-partial, component-versions) ────────────────────
-
-
-def test_backend_settings_partial(
-    client: TestClient, mock_stream_success: None, mock_backend_info_empty: None
-) -> None:
-    client.get("/api/backend/stream?name=demo&template=backend")
-    resp = client.get("/backend/demo/settings-partial")
-    assert resp.status_code == 200
-
-
-def test_backend_settings_partial_nonexistent_returns_404(
-    client: TestClient,
-) -> None:
-    assert client.get("/backend/nonexistent/settings-partial").status_code == 404
+# ── backend detail (component-versions) ──────────────────────────────────────
 
 
 def test_backend_component_versions_invalid_component_returns_400(
@@ -448,16 +418,6 @@ def test_backend_component_versions_nonexistent_env_returns_404(
 ) -> None:
     resp = client.get("/api/backend/nonexistent/components/engine/versions")
     assert resp.status_code == 404
-
-
-def test_cloud_local_settings_partial(
-    cloud_local_client: TestClient,
-    mock_cl_stream_success: None,
-    mock_cloud_local_info_empty: None,
-) -> None:
-    cloud_local_client.get("/api/cloud-local/stream?name=cl-demo&template=cloud-local")
-    resp = cloud_local_client.get("/cloud-local/cl-demo/settings-partial")
-    assert resp.status_code == 200
 
 
 def test_cloud_local_component_versions_invalid_returns_400(
