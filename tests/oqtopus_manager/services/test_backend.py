@@ -12,7 +12,13 @@ from pytest_mock import MockerFixture
 from oqtopus_manager.models.environment import Environment
 from oqtopus_manager.services import backend as backend_service
 from oqtopus_manager.services.backend import (
-    build_stream_args,
+    build_build_sse_runtime_args,
+    build_device_status_args,
+    build_install_args,
+    build_service_args,
+    build_uninstall_args,
+    build_update_args,
+    build_versions_args,
     components_installed,
     config_which_to_filename,
     get_log_file,
@@ -384,156 +390,139 @@ class TestResolveInstalledConfigPath:
         assert resolve_installed_config_path("unknown", "config.yaml", self._meta(), tmp_path) is None
 
 
-# ── build_stream_args ────────────────────────────────────────────────────────
-
-_DEFAULTS: dict = {
-    "service": "all",
-    "component": "engine",
-    "version": "",
-    "foreground": False,
-    "status": "",
-    "skip_sse_build": False,
-}
+# ── per-operation argv builders ──────────────────────────────────────────────
 
 
-def _be(cmd: str, **kwargs: object) -> list[str]:
-    """Call build_stream_args with defaults overridden by kwargs."""
-    params = {**_DEFAULTS, **kwargs}
-    return build_stream_args(cmd, **params)  # type: ignore[arg-type]
-
-
-class TestBuildStreamArgs:
-    def test_status_and_info_are_no_longer_dispatchable(self) -> None:
-        # Read-only cmds moved to JSON endpoints; the dispatcher must reject
-        # them now rather than silently pass through.
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            _be("status")
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            _be("info")
-
+class TestBuildServiceArgs:
     def test_start_valid_service(self) -> None:
-        assert _be("start", service="core") == ["start", "core"]
+        assert build_service_args("start", "core", False) == ["start", "core"]
 
     def test_start_with_foreground(self) -> None:
-        assert _be("start", service="all", foreground=True) == [
+        assert build_service_args("start", "all", True) == [
             "start",
             "all",
             "--foreground",
         ]
 
     def test_stop_valid_service(self) -> None:
-        assert _be("stop", service="gateway") == ["stop", "gateway"]
+        assert build_service_args("stop", "gateway", False) == ["stop", "gateway"]
 
     def test_restart_valid_service(self) -> None:
-        assert _be("restart", service="tranqu") == ["restart", "tranqu"]
+        assert build_service_args("restart", "tranqu", False) == ["restart", "tranqu"]
 
-    def test_start_invalid_service_raises(self) -> None:
+    def test_invalid_service_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Invalid service"):
-            _be("start", service="no-such-service")
+            build_service_args("start", "no-such-service", False)
 
-    def test_versions_valid_component(self) -> None:
-        assert _be("versions", component="engine") == ["versions", "engine"]
 
-    def test_versions_invalid_component_raises(self) -> None:
+class TestBuildVersionsArgs:
+    def test_valid_component(self) -> None:
+        assert build_versions_args("engine") == ["versions", "engine"]
+
+    def test_invalid_component_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Invalid component"):
-            _be("versions", component="bogus")
+            build_versions_args("bogus")
 
+
+class TestBuildInstallArgs:
     def test_install_all(self) -> None:
-        assert _be("install", component="all") == ["install", "all"]
+        assert build_install_args("all", "", False) == ["install", "all"]
 
-    def test_install_component_with_version(self) -> None:
-        assert _be("install", component="engine", version="v1.2") == [
+    def test_component_with_version(self) -> None:
+        assert build_install_args("engine", "v1.2", False) == [
             "install",
             "engine",
             "v1.2",
         ]
 
-    def test_install_skip_sse_build(self) -> None:
-        result = _be("install", component="engine", skip_sse_build=True)
+    def test_skip_sse_build(self) -> None:
+        result = build_install_args("engine", "", True)
         assert "--skip-sse-build" in result
 
-    def test_install_invalid_component_raises(self) -> None:
+    def test_invalid_component_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Invalid component"):
-            _be("install", component="unknown")
+            build_install_args("unknown", "", False)
 
-    def test_update_valid_component(self) -> None:
-        assert _be("update", component="tranqu") == ["update", "tranqu"]
 
-    def test_update_invalid_component_raises(self) -> None:
+class TestBuildUpdateArgs:
+    def test_valid_component(self) -> None:
+        assert build_update_args("tranqu") == ["update", "tranqu"]
+
+    def test_invalid_component_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Invalid component"):
-            _be("update", component="bogus")
+            build_update_args("bogus")
 
-    def test_uninstall_with_version(self) -> None:
-        assert _be("uninstall", component="gateway", version="v2.0") == [
+
+class TestBuildUninstallArgs:
+    def test_with_version(self) -> None:
+        assert build_uninstall_args("gateway", "v2.0") == [
             "uninstall",
             "gateway",
             "v2.0",
         ]
 
-    def test_uninstall_missing_version_raises(self) -> None:
+    def test_missing_version_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="version is required"):
-            _be("uninstall", component="gateway", version="")
+            build_uninstall_args("gateway", "")
 
-    def test_uninstall_invalid_component_raises(self) -> None:
+    def test_invalid_component_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Invalid component"):
-            _be("uninstall", component="bogus", version="v1")
+            build_uninstall_args("bogus", "v1")
 
+
+class TestBuildBuildSseRuntimeArgs:
     def test_build(self) -> None:
-        assert _be("build") == ["build", "sse-runtime"]
+        assert build_build_sse_runtime_args() == ["build", "sse-runtime"]
 
-    def test_device_status_show_is_no_longer_dispatchable(self) -> None:
-        # Moved to GET /api/backend/{name}/device-status.
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            _be("device-status-show")
 
-    def test_device_status_set_valid(self) -> None:
-        assert _be("device-status-set", status="active") == ["device-status", "active"]
+class TestBuildDeviceStatusArgs:
+    def test_valid(self) -> None:
+        assert build_device_status_args("active") == ["device-status", "active"]
 
-    def test_device_status_set_invalid_raises(self) -> None:
+    def test_invalid_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Invalid status"):
-            _be("device-status-set", status="broken")
-
-    def test_unknown_command_raises(self) -> None:
-        with pytest.raises(InvalidArgumentError, match="Unknown command"):
-            _be("no-such-cmd")
+            build_device_status_args("broken")
 
 
-class TestStreamLock:
-    """stream_lock must pick the exact scope for each cmd (see its own docstring)."""
+# ── per-operation lock helpers ───────────────────────────────────────────────
 
+
+class TestServiceLockFor:
     @pytest.mark.anyio
-    async def test_start_specific_service_locks_env_service(self) -> None:
+    async def test_specific_service_locks_env_service(self) -> None:
         registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "start", "qulacs", "core", "engine", operation="op", held_by="u"
+        async with backend_service.service_lock_for(
+            registry, "qulacs", "core", operation="op", held_by="u"
         ):
             [info] = registry.snapshot()
             assert info.scope == "qulacs/core"
         assert registry.snapshot() == []
 
     @pytest.mark.anyio
-    async def test_start_all_locks_env_wide(self) -> None:
+    async def test_all_locks_env_wide(self) -> None:
         registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "start", "qulacs", "all", "engine", operation="op", held_by="u"
+        async with backend_service.service_lock_for(
+            registry, "qulacs", "all", operation="op", held_by="u"
         ):
             [info] = registry.snapshot()
             assert info.scope == "qulacs/*"
 
+
+class TestInstallLockFor:
     @pytest.mark.anyio
-    async def test_install_specific_component_locks_component_and_env(self) -> None:
+    async def test_specific_component_locks_component_and_env(self) -> None:
         registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "install", "qulacs", "all", "gateway", operation="op", held_by="u"
+        async with backend_service.install_lock_for(
+            registry, "qulacs", "gateway", operation="op", held_by="u"
         ):
             scopes = {info.scope for info in registry.snapshot()}
             assert scopes == {"component:gateway", "environment:qulacs"}
 
     @pytest.mark.anyio
-    async def test_install_all_locks_every_component_and_env(self) -> None:
+    async def test_all_locks_every_component_and_env(self) -> None:
         registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "install", "qulacs", "all", "all", operation="op", held_by="u"
+        async with backend_service.install_lock_for(
+            registry, "qulacs", "all", operation="op", held_by="u"
         ):
             scopes = {info.scope for info in registry.snapshot()}
             assert scopes == {
@@ -543,51 +532,24 @@ class TestStreamLock:
                 "environment:qulacs",
             }
 
-    @pytest.mark.anyio
-    async def test_update_locks_component_and_env(self) -> None:
-        registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "update", "qulacs", "all", "tranqu", operation="op", held_by="u"
-        ):
-            scopes = {info.scope for info in registry.snapshot()}
-            assert scopes == {"component:tranqu", "environment:qulacs"}
 
+class TestComponentLockFor:
     @pytest.mark.anyio
-    async def test_uninstall_locks_component_and_env(self) -> None:
+    async def test_locks_component_and_env(self) -> None:
         registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "uninstall", "qulacs", "all", "engine", operation="op", held_by="u"
+        async with backend_service.component_lock_for(
+            registry, "qulacs", "engine", operation="op", held_by="u"
         ):
             scopes = {info.scope for info in registry.snapshot()}
             assert scopes == {"component:engine", "environment:qulacs"}
 
+
+class TestBuildSseRuntimeLock:
     @pytest.mark.anyio
-    async def test_build_locks_engine_component_only(self) -> None:
+    async def test_locks_engine_component_only(self) -> None:
         registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "build", "qulacs", "all", "engine", operation="op", held_by="u"
+        async with backend_service.build_sse_runtime_lock(
+            registry, operation="op", held_by="u"
         ):
             [info] = registry.snapshot()
             assert info.scope == "component:engine"
-
-    @pytest.mark.anyio
-    async def test_device_status_set_needs_no_lock(self) -> None:
-        registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry,
-            "device-status-set",
-            "qulacs",
-            "all",
-            "engine",
-            operation="op",
-            held_by="u",
-        ):
-            assert registry.snapshot() == []
-
-    @pytest.mark.anyio
-    async def test_versions_needs_no_lock(self) -> None:
-        registry = LockRegistry()
-        async with backend_service.stream_lock(
-            registry, "versions", "qulacs", "all", "engine", operation="op", held_by="u"
-        ):
-            assert registry.snapshot() == []

@@ -1,7 +1,7 @@
-"""Integration tests for exclusive-lock wiring on the stream dispatcher endpoints.
+"""Integration tests for exclusive-lock wiring on the dedicated operation endpoints.
 
-The lock *semantics* (which scope each cmd acquires) are covered by the
-service-layer stream_lock tests; these tests only confirm the router
+The lock *semantics* (which scope each operation acquires) are covered by
+the service-layer lock-helper tests; these tests only confirm the router
 actually threads a real lock and the configured operation timeout through
 to ``stream_oqtopus_subcommand``, rather than mocking it away silently.
 """
@@ -26,8 +26,8 @@ _PERMISSIONS = {
     "operator": [
         "environment.get", "environment.create", "environment.delete",
         "environment.config.get", "environment.config.update",
-        "environment.log.get", "environment.service.manage",
-        "environment.component.manage", "app_settings.get",
+        "environment.log.get", "environment.service.control",
+        "environment.component.manage", "environment.locks.manage", "app_settings.get",
     ],
     "admin": ["app_settings.update"],
 }
@@ -105,14 +105,14 @@ def _fake_stream(mocker: MockerFixture, target: str) -> MagicMock:
 # ── backend ──────────────────────────────────────────────────────────────────
 
 
-def test_backend_stream_start_gets_operation_timeout_and_a_real_lock(
+def test_backend_start_gets_operation_timeout_and_a_real_lock(
     backend_client: TestClient, mocker: MockerFixture
 ) -> None:
     mock = _fake_stream(
-        mocker, "oqtopus_manager.routers.backend.detail.stream_oqtopus_subcommand"
+        mocker, "oqtopus_manager.routers._utils.stream_oqtopus_subcommand"
     )
-    resp = backend_client.get(
-        "/api/backend/demo/stream?cmd=start&service=core"
+    resp = backend_client.post(
+        "/api/backend/demo/services/core/start", json={"foreground": False}
     )
     assert resp.status_code == 200
     _args, kwargs = mock.call_args
@@ -120,14 +120,14 @@ def test_backend_stream_start_gets_operation_timeout_and_a_real_lock(
     assert not isinstance(kwargs["lock"], contextlib.nullcontext)
 
 
-def test_backend_stream_device_status_set_gets_no_lock(
+def test_backend_device_status_gets_no_lock(
     backend_client: TestClient, mocker: MockerFixture
 ) -> None:
     mock = _fake_stream(
-        mocker, "oqtopus_manager.routers.backend.detail.stream_oqtopus_subcommand"
+        mocker, "oqtopus_manager.routers._utils.stream_oqtopus_subcommand"
     )
-    resp = backend_client.get(
-        "/api/backend/demo/stream?cmd=device-status-set&status=active"
+    resp = backend_client.post(
+        "/api/backend/demo/device-status", json={"status": "active"}
     )
     assert resp.status_code == 200
     _args, kwargs = mock.call_args
@@ -152,15 +152,15 @@ def test_backend_init_stream_gets_environment_lock(
 # ── cloud-local ──────────────────────────────────────────────────────────────
 
 
-def test_cloud_local_stream_start_gets_operation_timeout_and_a_real_lock(
+def test_cloud_local_start_gets_operation_timeout_and_a_real_lock(
     cloud_local_client: TestClient, mocker: MockerFixture
 ) -> None:
     mock = _fake_stream(
         mocker,
-        "oqtopus_manager.routers.cloud_local.detail.stream_oqtopus_subcommand",
+        "oqtopus_manager.routers._utils.stream_oqtopus_subcommand",
     )
-    resp = cloud_local_client.get(
-        "/api/cloud-local/cl-demo/stream?cmd=start&service=worker"
+    resp = cloud_local_client.post(
+        "/api/cloud-local/cl-demo/services/worker/start", json={"foreground": False}
     )
     assert resp.status_code == 200
     _args, kwargs = mock.call_args
@@ -168,15 +168,15 @@ def test_cloud_local_stream_start_gets_operation_timeout_and_a_real_lock(
     assert not isinstance(kwargs["lock"], contextlib.nullcontext)
 
 
-def test_cloud_local_stream_versions_gets_no_lock(
+def test_cloud_local_versions_stream_gets_no_lock(
     cloud_local_client: TestClient, mocker: MockerFixture
 ) -> None:
     mock = _fake_stream(
         mocker,
-        "oqtopus_manager.routers.cloud_local.detail.stream_oqtopus_subcommand",
+        "oqtopus_manager.routers._utils.stream_oqtopus_subcommand",
     )
     resp = cloud_local_client.get(
-        "/api/cloud-local/cl-demo/stream?cmd=versions&component=cloud"
+        "/api/cloud-local/cl-demo/components/cloud/versions/stream"
     )
     assert resp.status_code == 200
     _args, kwargs = mock.call_args

@@ -1,5 +1,8 @@
 """Backend router package — collects all backend APIRouters."""
 
+from oqtopus_manager.routers.backend.components import (
+    api_router as components_api_router,
+)
 from oqtopus_manager.routers.backend.detail import api_router as detail_api_router
 from oqtopus_manager.routers.backend.detail import router as detail_router
 from oqtopus_manager.routers.backend.dotenv import api_router as dotenv_api_router
@@ -14,6 +17,7 @@ from oqtopus_manager.routers.backend.service_config import (
 from oqtopus_manager.routers.backend.service_config import (
     router as service_config_router,
 )
+from oqtopus_manager.routers.backend.services import api_router as services_api_router
 
 # HTML pages, kept at /backend
 routers = [list_router, detail_router, dotenv_router, service_config_router, log_router]  # ruff: ignore[non-empty-init-module]
@@ -24,4 +28,6 @@ api_routers = [  # ruff: ignore[non-empty-init-module]
     dotenv_api_router,
     service_config_api_router,
     log_api_router,
+    services_api_router,
+    components_api_router,
 ]

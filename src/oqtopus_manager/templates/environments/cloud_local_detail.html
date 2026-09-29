@@ -418,7 +418,7 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     return { type: type, data: dataLines.join('\n') };
   }
 
-  function startStream(url, label, btnEl, onSuccess, onFinally) {
+  function startStream(url, label, btnEl, onSuccess, onFinally, fetchOptions) {
     if (currentAbort) currentAbort.abort();
     var abort = new AbortController();
     currentAbort = abort;
@@ -443,7 +443,14 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
       if (typeof onFinally === 'function') onFinally();
     }
 
-    fetch(url, { signal: abort.signal })
+    var opts = { signal: abort.signal };
+    if (fetchOptions && fetchOptions.method) opts.method = fetchOptions.method;
+    if (fetchOptions && fetchOptions.body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(fetchOptions.body);
+    }
+
+    fetch(url, opts)
       .then(function (res) {
         if (!res.ok) {
           return res.json().catch(function () { return {}; }).then(function (body) {
@@ -490,26 +497,28 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   }
 
   window.runServiceCmdFor = function (action, svc, btn) {
-    var params = new URLSearchParams({ cmd: action, service: svc });
-    startStream('/api/cloud-local/' + envName + '/stream?' + params, action + ' ' + svc, btn,
-      function () { window.fetchStatus(null); });
+    var url = '/api/cloud-local/' + envName + '/services/' + encodeURIComponent(svc) + '/' + action;
+    var body = action === 'start' ? { foreground: false } : undefined;
+    startStream(url, action + ' ' + svc, btn,
+      function () { window.fetchStatus(null); }, null,
+      { method: 'POST', body: body });
   };
 
   window.runComponentCmd = function (action, btn) {
     var comp = document.getElementById('comp').value;
     var ver  = document.getElementById('ver').value.trim();
-    var params = new URLSearchParams({ cmd: action, component: comp });
-    if (ver) params.set('version', ver);
     var needsRefresh = (action === 'install' || action === 'update' || action === 'uninstall');
     var compBtnIds = ['btn-versions', 'btn-install', 'btn-uninstall'];
     compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
-    startStream('/api/cloud-local/' + envName + '/stream?' + params,
-      action + ' ' + comp + (ver ? ' ' + ver : ''), btn,
+    var url = '/api/cloud-local/' + envName + '/components/' + encodeURIComponent(comp) + '/' + action;
+    var body = (action === 'install' || action === 'uninstall') ? { version: ver } : undefined;
+    startStream(url, action + ' ' + comp + (ver ? ' ' + ver : ''), btn,
       needsRefresh ? fetchSettings : null,
       function () {
         compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
         syncCompState();
-      });
+      },
+      { method: 'POST', body: body });
   };
 
   var _VALID_COMP = new Set({{ components | tojson }});
@@ -517,8 +526,8 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   window.fetchVersions = function (btn) {
     var comp = document.getElementById('comp').value;
     if (!_VALID_COMP.has(comp)) return;
-    var params = new URLSearchParams({ cmd: 'versions', component: comp });
-    startStream('/api/cloud-local/' + envName + '/stream?' + params, 'versions ' + comp, btn);
+    startStream('/api/cloud-local/' + envName + '/components/' + encodeURIComponent(comp) + '/versions/stream',
+      'versions ' + comp, btn);
     fetch('/api/cloud-local/' + envName + '/components/' + encodeURIComponent(comp) + '/versions')
       .then(function (r) { return r.json(); })
       .then(function (data) {

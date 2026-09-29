@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from oqtopus_manager.services.exceptions import LockConflictError, ServiceError
+from oqtopus_manager.util.cli import stream_oqtopus_subcommand
 
 if TYPE_CHECKING:
+    import pathlib
+    from collections.abc import AsyncGenerator
+    from contextlib import AbstractAsyncContextManager
+
     from fastapi import Request
     from fastapi.templating import Jinja2Templates
 
@@ -38,6 +43,37 @@ def _get_held_by(request: Request) -> str:
     """
     user = getattr(request.state, "user", None)
     return user.account if user is not None else "unknown"
+
+
+def _sse_response(
+    subcommand: str,
+    args: list[str],
+    cwd: pathlib.Path,
+    cfg: AppConfig,
+    lock: AbstractAsyncContextManager[None],
+) -> StreamingResponse:
+    """Run *subcommand* with *args* under *lock* and stream its output as SSE.
+
+    Shared by every dedicated operation endpoint (backend and cloud-local,
+    services and components) so each one only has to build its own argv and
+    pick its own lock.
+
+    Returns:
+        StreamingResponse with Server-Sent Events-formatted output.
+
+    """
+
+    async def event_stream() -> AsyncGenerator[str]:
+        async for chunk in stream_oqtopus_subcommand(
+            subcommand,
+            args,
+            cwd,
+            timeout=cfg.oqtopus_cli_operation_timeout_sec,
+            lock=lock,
+        ):
+            yield chunk
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 def _lock_error_response(exc: ServiceError) -> JSONResponse:

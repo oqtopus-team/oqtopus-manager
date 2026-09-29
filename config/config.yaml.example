@@ -99,8 +99,9 @@ permissions:
     - environment.config.get
     - environment.config.update
     - environment.log.get
-    - environment.service.manage
+    - environment.service.control
     - environment.component.manage
+    - environment.locks.manage
     - app_settings.get
   admin:
     - app_settings.update
