@@ -39,7 +39,9 @@ pinned to a specific version:
 
 ![Cloud Local environment detail page, components not installed](../asset/screenshots/cloud_local_detail_not_installed.png)
 
-Pick a component (or `all`), optionally a version, and click **Install**. Installing runs `oqtopus cloud-local
+Pick a component (or `all`), optionally a version, and click **Install**. Installing the same
+component from two environments at once makes the second one wait for the first to finish — see
+[Exclusive Locks](locks.md). Installing runs `oqtopus cloud-local
 install` and streams its output the same way environment creation does.
 
 ## Start services

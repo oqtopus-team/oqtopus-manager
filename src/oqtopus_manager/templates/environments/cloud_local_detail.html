@@ -155,6 +155,68 @@
 
   </div>{# /ops-sections #}
 
+  {# Locks | full width, collapsed by default, badge only when something is held #}
+  <details data-sec="sec-locks" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group lg:col-span-2">
+    <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-[#4887FA]">Locks</h2>
+      <span id="locks-badge" class="hidden inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span id="locks-badge-text"></span>
+      </span>
+    </summary>
+    <div>
+      <table class="w-full" style="border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td class="px-5 py-1.5" style="width:9rem">
+              <button onclick="fetchLocks(this)" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+              </button>
+            </td>
+            <td class="py-1.5 text-xs text-gray-400" colspan="4">Shared across every environment on this host.</td>
+          </tr>
+        </thead>
+        <tbody id="locks-table-wrap">
+          <tr><td colspan="5" class="px-5 py-2 text-sm text-gray-400">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+</div>
+
+{# Force-unlock confirmation modal #}
+<div id="force-unlock-lock-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+    <div class="flex items-start gap-3 mb-4">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-500 flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <div>
+        <h3 class="text-base font-semibold text-gray-800 mb-1">Force Unlock</h3>
+        <p class="text-sm text-gray-500">
+          This does not stop the operation still running underneath it. Force-unlocking
+          <code id="force-unlock-lock-scope-text" class="font-mono text-xs bg-gray-100 rounded px-1"></code>
+          lets a new operation start concurrently with it -- the same collision locking exists to
+          prevent. Use only if you're confident the holder is stuck, not merely slow.
+        </p>
+      </div>
+    </div>
+    <div class="flex justify-end gap-3">
+      <button onclick="closeForceUnlockLockModal()" class="btn btn-sm btn-outline">Cancel</button>
+      <button onclick="confirmForceUnlockLock()" class="btn btn-sm btn-error">Force Unlock</button>
+    </div>
+  </div>
 </div>
 
 {# Console panel #}
@@ -467,9 +529,73 @@ var envName = {{ env.name | tojson }};
       });
   };
 
+  function renderLocksTable(locks) {
+    var badge = document.getElementById('locks-badge');
+    var wrap = document.getElementById('locks-table-wrap');
+    if (!locks.length) {
+      badge.classList.add('hidden');
+      wrap.innerHTML = '<tr><td colspan="5" class="px-5 py-2 text-sm text-gray-400">No locks currently held.</td></tr>';
+      return;
+    }
+    badge.classList.remove('hidden');
+    document.getElementById('locks-badge-text').textContent =
+      locks.length + (locks.length === 1 ? ' lock active' : ' locks active');
+    var html = '';
+    locks.forEach(function (l) {
+      html += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
+        '<td class="px-5 py-1.5 text-sm font-mono text-gray-600">' + escapeHtml(l.scope) + '</td>' +
+        '<td class="py-1.5 text-sm text-gray-600">' + escapeHtml(l.operation) + '</td>' +
+        '<td class="py-1.5 text-sm text-gray-500">' + escapeHtml(l.held_by) + '</td>' +
+        '<td class="py-1.5 text-sm text-gray-400" style="white-space:nowrap">' + escapeHtml(l.held_since) + '</td>' +
+        '<td class="py-1.5 pr-5" style="width:1px; white-space:nowrap">' +
+        '<button onclick="forceUnlockScope(this.dataset.scope)" data-scope="' + escapeHtml(l.scope) + '" class="btn btn-xs btn-outline btn-error">Force unlock</button>' +
+        '</td>' +
+        '</tr>';
+    });
+    wrap.innerHTML = html;
+  }
+
+  window.fetchLocks = function (btn) {
+    var icon = btn ? btn.querySelector('svg') : null;
+    if (btn) btn.disabled = true;
+    if (icon) icon.classList.add('animate-spin');
+    fetch('/api/cloud-local/' + envName + '/locks')
+      .then(function (r) { if (!r.ok) throw new Error('locks fetch failed'); return r.json(); })
+      .then(function (locks) {
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+        renderLocksTable(locks);
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        if (icon) icon.classList.remove('animate-spin');
+      });
+  };
+
+  var _pendingUnlockScope = null;
+  window.forceUnlockScope = function (scope) {
+    _pendingUnlockScope = scope;
+    document.getElementById('force-unlock-lock-scope-text').textContent = scope;
+    document.getElementById('force-unlock-lock-modal').classList.remove('hidden');
+  };
+  window.closeForceUnlockLockModal = function () {
+    document.getElementById('force-unlock-lock-modal').classList.add('hidden');
+    _pendingUnlockScope = null;
+  };
+  window.confirmForceUnlockLock = function () {
+    var scope = _pendingUnlockScope;
+    document.getElementById('force-unlock-lock-modal').classList.add('hidden');
+    _pendingUnlockScope = null;
+    if (!scope) return;
+    fetch('/api/cloud-local/' + envName + '/locks/force-unlock?' + new URLSearchParams({ scope: scope }), { method: 'POST' })
+      .then(function () { window.fetchLocks(null); });
+  };
+
   if (document.getElementById('ops-sections').style.display !== 'none') {
     window.fetchStatus(null);
   }
+  window.fetchLocks(null);
+  setInterval(function () { window.fetchLocks(null); }, 5000);
 
   window.toggleFullscreen = function () {
     var ca = document.getElementById('console-area');

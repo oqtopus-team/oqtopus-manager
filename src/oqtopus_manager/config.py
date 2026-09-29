@@ -35,7 +35,8 @@ class AppConfig(BaseModel):
     app_icon_path: pathlib.Path | None
     favicon_path: pathlib.Path | None
     file_edit_lock_timeout_sec: int
-    oqtopus_cli_timeout_sec: int
+    oqtopus_cli_read_timeout_sec: int
+    oqtopus_cli_operation_timeout_sec: int
     environment_templates: list[str]
     sidebar_links: list[SidebarLink] = []
     auth: AuthConfig = AuthConfig()
@@ -85,7 +86,12 @@ class AppConfig(BaseModel):
                 else None
             ),
             file_edit_lock_timeout_sec=behavior["file_edit_lock_timeout_sec"],
-            oqtopus_cli_timeout_sec=behavior.get("oqtopus_cli_timeout_sec", 10),
+            oqtopus_cli_read_timeout_sec=behavior.get(
+                "oqtopus_cli_read_timeout_sec", 10
+            ),
+            oqtopus_cli_operation_timeout_sec=behavior.get(
+                "oqtopus_cli_operation_timeout_sec", 600
+            ),
             environment_templates=appearance["environment_templates"],
             sidebar_links=[
                 SidebarLink(**item) for item in (appearance.get("sidebar_links") or [])

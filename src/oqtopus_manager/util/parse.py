@@ -168,8 +168,9 @@ def _component_kind(version: str | None) -> str | None:
 # Services reported as one or more container names rather than a PID.
 # Not derivable from the text output alone (a "Stopped" line carries no
 # kind information), so it has to be hardcoded here until the CLI reports
-# `kind` directly.
-_CONTAINER_SERVICE_NAMES = frozenset({"db"})
+# `kind` directly. Public (no leading underscore): also imported by
+# services/locks.py to decide the exclusive-lock scope for a service.
+CONTAINER_SERVICE_NAMES = frozenset({"db"})
 
 _PID_RE = re.compile(r"running\s*\(pid\s+(\d+)\)", re.IGNORECASE)
 _CONTAINER_LIST_RE = re.compile(r"running\s*\(([^)]+)\)", re.IGNORECASE)
@@ -208,7 +209,7 @@ def parse_status(
             )
             continue
 
-        if name in _CONTAINER_SERVICE_NAMES:
+        if name in CONTAINER_SERVICE_NAMES:
             container_match = _CONTAINER_LIST_RE.search(state_raw)
             containers = (
                 [c.strip() for c in container_match.group(1).split(",")]

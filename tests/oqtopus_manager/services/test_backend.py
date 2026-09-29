@@ -27,6 +27,7 @@ from oqtopus_manager.services.exceptions import (
     CommandFailedError,
     InvalidArgumentError,
 )
+from oqtopus_manager.services.locks import LockRegistry
 from oqtopus_manager.util.cli import CommandResult
 
 # ── read_metadata is exercised via services.environment.read_metadata; see
@@ -35,7 +36,7 @@ from oqtopus_manager.util.cli import CommandResult
 
 def _cfg(tmp_path: pathlib.Path) -> MagicMock:
     return MagicMock(
-        oqtopus_cli_timeout_sec=10, default_environment_base_path=tmp_path
+        oqtopus_cli_read_timeout_sec=10, default_environment_base_path=tmp_path
     )
 
 
@@ -495,3 +496,98 @@ class TestBuildStreamArgs:
     def test_unknown_command_raises(self) -> None:
         with pytest.raises(InvalidArgumentError, match="Unknown command"):
             _be("no-such-cmd")
+
+
+class TestStreamLock:
+    """stream_lock must pick the exact scope for each cmd (see its own docstring)."""
+
+    @pytest.mark.anyio
+    async def test_start_specific_service_locks_env_service(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "start", "qulacs", "core", "engine", operation="op", held_by="u"
+        ):
+            [info] = registry.snapshot()
+            assert info.scope == "qulacs/core"
+        assert registry.snapshot() == []
+
+    @pytest.mark.anyio
+    async def test_start_all_locks_env_wide(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "start", "qulacs", "all", "engine", operation="op", held_by="u"
+        ):
+            [info] = registry.snapshot()
+            assert info.scope == "qulacs/*"
+
+    @pytest.mark.anyio
+    async def test_install_specific_component_locks_component_and_env(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "install", "qulacs", "all", "gateway", operation="op", held_by="u"
+        ):
+            scopes = {info.scope for info in registry.snapshot()}
+            assert scopes == {"component:gateway", "environment:qulacs"}
+
+    @pytest.mark.anyio
+    async def test_install_all_locks_every_component_and_env(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "install", "qulacs", "all", "all", operation="op", held_by="u"
+        ):
+            scopes = {info.scope for info in registry.snapshot()}
+            assert scopes == {
+                "component:engine",
+                "component:tranqu",
+                "component:gateway",
+                "environment:qulacs",
+            }
+
+    @pytest.mark.anyio
+    async def test_update_locks_component_and_env(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "update", "qulacs", "all", "tranqu", operation="op", held_by="u"
+        ):
+            scopes = {info.scope for info in registry.snapshot()}
+            assert scopes == {"component:tranqu", "environment:qulacs"}
+
+    @pytest.mark.anyio
+    async def test_uninstall_locks_component_and_env(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "uninstall", "qulacs", "all", "engine", operation="op", held_by="u"
+        ):
+            scopes = {info.scope for info in registry.snapshot()}
+            assert scopes == {"component:engine", "environment:qulacs"}
+
+    @pytest.mark.anyio
+    async def test_build_locks_engine_component_only(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "build", "qulacs", "all", "engine", operation="op", held_by="u"
+        ):
+            [info] = registry.snapshot()
+            assert info.scope == "component:engine"
+
+    @pytest.mark.anyio
+    async def test_device_status_set_needs_no_lock(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry,
+            "device-status-set",
+            "qulacs",
+            "all",
+            "engine",
+            operation="op",
+            held_by="u",
+        ):
+            assert registry.snapshot() == []
+
+    @pytest.mark.anyio
+    async def test_versions_needs_no_lock(self) -> None:
+        registry = LockRegistry()
+        async with backend_service.stream_lock(
+            registry, "versions", "qulacs", "all", "engine", operation="op", held_by="u"
+        ):
+            assert registry.snapshot() == []

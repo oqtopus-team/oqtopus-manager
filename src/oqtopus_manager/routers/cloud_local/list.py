@@ -10,7 +10,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from oqtopus_auth.fastapi import require_permission
 
 from oqtopus_manager.routers._problem import serialize_outcome
-from oqtopus_manager.routers._utils import _get_config, _get_templates
+from oqtopus_manager.routers._utils import (
+    _get_config,
+    _get_held_by,
+    _get_lock_registry,
+    _get_templates,
+)
 from oqtopus_manager.services import cloud_local as cloud_local_service
 from oqtopus_manager.services import environment as env_service
 from oqtopus_manager.services.exceptions import ServiceError
@@ -161,10 +166,18 @@ async def stream_environment_init(
 
     """
     cfg = _get_config(request)
+    lock = _get_lock_registry(request).env_lock(
+        name, operation=f"init (template={template})", held_by=_get_held_by(request)
+    )
 
     async def event_stream() -> AsyncGenerator[str]:
         async for chunk in env_service.stream_environment_init(
-            cfg, name, template, root_path
+            cfg,
+            name,
+            template,
+            root_path,
+            timeout=cfg.oqtopus_cli_operation_timeout_sec,
+            lock=lock,
         ):
             yield chunk
 
@@ -191,8 +204,13 @@ async def delete_environment(request: Request, name: str) -> HTMLResponse:
 
     """
     cfg = _get_config(request)
+    registry = _get_lock_registry(request)
+    held_by = _get_held_by(request)
     try:
-        await env_service.delete_environment(cfg, name, "cloud-local")
+        async with registry.env_all_and_env_lock(
+            name, operation="delete", held_by=held_by
+        ):
+            await env_service.delete_environment(cfg, name, "cloud-local")
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
