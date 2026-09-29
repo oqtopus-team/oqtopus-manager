@@ -268,7 +268,9 @@ async def get_locks(request: Request, name: str) -> JSONResponse:  # ruff: ignor
     dependencies=[require_permission("environment.service.manage")],
 )
 async def force_unlock_lock(
-    request: Request, name: str, scope: str  # ruff: ignore[unused-function-argument]
+    request: Request,
+    name: str,  # ruff: ignore[unused-function-argument]
+    scope: str,
 ) -> JSONResponse:
     """Forcibly clear one lock reported by ``GET .../locks``.
 

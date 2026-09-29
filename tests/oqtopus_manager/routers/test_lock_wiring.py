@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import contextlib
 import pathlib
+from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 import yaml
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pytest_mock import MockerFixture
 
@@ -92,7 +95,7 @@ def cloud_local_client(
     )
 
 
-def _fake_stream(mocker: MockerFixture, target: str) -> MockerFixture:
+def _fake_stream(mocker: MockerFixture, target: str) -> MagicMock:
     async def _gen(*_args: object, **_kwargs: object):
         yield "event: done\ndata: success\n\n"
 
@@ -215,7 +218,7 @@ def test_force_unlock_unheld_scope_returns_false(backend_client: TestClient) -> 
 async def test_get_locks_shows_a_held_lock_and_force_unlock_clears_it(
     backend_client: TestClient,
 ) -> None:
-    registry = backend_client.app.state.lock_registry
+    registry = cast(FastAPI, backend_client.app).state.lock_registry
     cm = registry.component_lock("gateway", operation="install gateway", held_by="alice")
     await cm.__aenter__()  # left open on purpose: simulates a lock held mid-request
     try:
