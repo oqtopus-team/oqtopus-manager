@@ -185,3 +185,38 @@ def test_load_without_permissions_sets_none(tmp_path: pathlib.Path, monkeypatch:
     )
     cfg = AppConfig.load(config_path)
     assert cfg.role_permissions is None
+
+
+def test_load_oidc_provider(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["auth"] = {
+        "provider": "oidc",
+        "oidc": {
+            "issuer": "https://issuer.example.com/",
+            "audience": "oqtopus-manager",
+            "principal_claim": "email",
+            "roles_claim": "cognito:groups",
+            "required_scope": "oqtopus-manager/access",
+        },
+        "role_mappings": {"oqtopus-manager.admin": "admin"},
+    }
+    config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    cfg = AppConfig.load(config_path)
+    assert cfg.auth.provider == "oidc"
+    assert cfg.auth.oidc is not None
+    assert cfg.auth.oidc.issuer == "https://issuer.example.com/"
+    assert cfg.auth.oidc.principal_claim == "email"
+    assert cfg.auth.header is None
+    assert cfg.auth.role_mappings == {"oqtopus-manager.admin": "admin"}
+
+
+def test_load_oidc_provider_requires_token_binding(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["auth"] = {"provider": "oidc", "oidc": {"issuer": "https://issuer.example.com/"}}
+    config_path.write_text(yaml.dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="token binding"):
+        AppConfig.load(config_path)

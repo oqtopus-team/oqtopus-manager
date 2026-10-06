@@ -10,6 +10,7 @@ For role-based access control, see [Permissions](permissions.md).
 |------------|-------------|
 | `none` | Authentication is disabled. All requests are allowed without a user identity. Suitable for local development only. |
 | `header` | Extracts user identity from a JWT carried in an HTTP header injected by a trusted reverse proxy (e.g. AWS ALB + Amazon Cognito via oauth2-proxy, or Cloudflare Access). |
+| `oidc` | Verifies an OAuth2/OIDC `Authorization: Bearer` token against the issuer's JWKS and optionally enforces an OAuth2 scope. Supports human tokens and machine-to-machine (client-credentials) callers. |
 
 ## provider: none
 
@@ -127,9 +128,85 @@ JWT signature verification prevents token forgery: even if an attacker injects a
 !!! warning "Token expiry"
     The proxy must refresh tokens before they expire. When using oauth2-proxy, set `cookie_refresh` to a value shorter than the identity provider's token lifetime (e.g. `cookie_refresh = "50m"` for a 60-minute token). If the token expires before refresh, requests will be rejected with `JWT verification failed: Signature has expired`.
 
+## provider: oidc
+
+Verifies the `Authorization: Bearer` token itself, instead of trusting a JWT injected by a reverse proxy.
+The token signature, `iss`, expiry and token binding (`aud` or client id) are always checked, and an
+OAuth2 scope can be required. Because roles are optional, this provider also accepts
+machine-to-machine (client-credentials) callers whose tokens carry a `scope` but no roles or groups.
+
+!!! warning "Roles and permissions"
+    Access to endpoints is decided by [Permissions](permissions.md), which are granted through roles.
+    A token without a roles claim authenticates successfully but has no roles, so requests to
+    endpoints that require a permission are rejected. Set `roles_claim` (and `role_mappings`) for
+    any caller that should be allowed to use the endpoints.
+
+<!--- pyml disable-next-line md024 --->
+### How OQTOPUS Manager authenticates each request
+
+1. **Token extraction** — read the `Authorization` header and strip the `Bearer` prefix.
+   If no token is present, the request is rejected.
+2. **Verification** — verify the signature against the issuer's JWKS (discovered from `issuer`,
+   or taken from `jwks_url`), and check `iss`, expiry and `algorithms`.
+   The token must be bound to this application by `audience` (`aud` claim) and/or `client_id`
+   (client-id claim). If verification fails, the request is rejected.
+3. **Scope check** — if `required_scope` is set and the token does not grant it, the request is rejected
+   as insufficient scope.
+4. **User identity** — the value of the claim named by `principal_claim` becomes the account name.
+   If the claim is missing, the request is rejected.
+5. **Roles** — if `roles_claim` is set, its value is read as a list of role strings
+   (JSON array or comma-separated string) and mapped through `role_mappings`.
+   `allow_raw_roles` is **not** available for this provider.
+
+<!--- pyml disable-next-line md024 --->
+### Full configuration reference
+
+```yaml
+auth:
+  provider: oidc
+  oidc:
+    issuer: https://your-issuer-url/
+    # jwks_url: https://your-jwks-url/       # omit to discover from issuer
+    audience: your-audience                  # expected aud claim
+    # client_id: your-client-id              # bind by client-id claim (e.g. Cognito access tokens)
+    # client_id_claim: client_id             # claim carrying the client id
+    # token_use: access                      # require token_use claim (Cognito: access | id)
+    algorithms: [RS256]
+    required_scope: oqtopus-manager/access   # omit to disable the scope check
+    principal_claim: email                   # "sub" (default), "email", or "azp" for M2M callers
+    roles_claim: "cognito:groups"            # optional; list = nested path
+  role_mappings:
+    your-app.operator: operator
+    your-app.admin: admin
+```
+
+### oidc.*
+
+| Key | Type | Required | Default | Description |
+|-----|------|----------|---------|-------------|
+| `issuer` | string | **Yes** | — | Expected `iss` claim. Also used to discover the JWKS endpoint. |
+| `jwks_url` | string | No | *(discovered from issuer)* | Explicit JWKS endpoint. Skips discovery. |
+| `audience` | string | See note | — | Expected `aud` claim. |
+| `client_id` | string or list of strings | See note | — | Bind the token to this application by the client-id claim. Needed for issuers whose access tokens carry no `aud` (e.g. Amazon Cognito). |
+| `client_id_claim` | string | No | `client_id` | Claim that carries the client id (some providers use `azp`). |
+| `allow_any_audience` | boolean | See note | `false` | **Dangerous.** Accept any token from the issuer regardless of `aud` / client id. Mutually exclusive with `audience` and `client_id`. |
+| `token_use` | string | No | — | Require the `token_use` claim to equal this value (Cognito access tokens use `access`, id tokens `id`). |
+| `algorithms` | list of strings | No | `[RS256]` | Accepted signing algorithms. Only asymmetric algorithms (`RS*`, `ES*`, `PS*`, `EdDSA`) are allowed. |
+| `required_scope` | string | No | — | OAuth2 scope the token must grant. Omit to disable the scope check. |
+| `principal_claim` | string | No | `sub` | Claim used as the account name. Use `azp` (the client id) for client-credentials callers, or `email` for human tokens. |
+| `roles_claim` | string or list of strings | No | — | Claim holding roles. A list selects a nested path. When omitted, the user has no roles. |
+
+!!! note "Token binding is required"
+    One of `audience`, `client_id` or `allow_any_audience: true` must be set, otherwise the
+    configuration is rejected at startup. Unknown keys under `oidc` are also rejected.
+
+!!! note "Sign out and the debug page"
+    `signout_url` exists only under `header`, so no **Sign out** link is shown with this provider.
+    The [debug endpoint](configuration.md#enable_debug_endpoint) decodes the `Authorization` header.
+
 ## allow_raw_roles
 
-`allow_raw_roles` is a list of [fnmatch](https://docs.python.org/3/library/fnmatch.html) glob patterns.
+`allow_raw_roles` applies to `provider: header` only. It is a list of [fnmatch](https://docs.python.org/3/library/fnmatch.html) glob patterns.
 
 | Pattern character | Meaning |
 |-------------------|---------|
