@@ -863,15 +863,15 @@ wheels = [
 
 [[package]]
 name = "oqtopus-auth"
-version = "0.1.1"
+version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/60/a84907fc8deccd756deaf37e52b9f52c28d7121f5c0addd0504def875619/oqtopus_auth-0.1.1.tar.gz", hash = "sha256:7dc150001f1f8db865e19b9f445b904ed373b78ad466b1243ae9fe3c4fd310e0", size = 239898, upload-time = "2026-09-11T03:21:53.967Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/f0/41dee5daff20cbbb78c0992370a6a2d14add732482d78b4c1ad4de707e60/oqtopus_auth-1.0.0.tar.gz", hash = "sha256:73bda31846d2364824e285f1ddd4e4c06d9229be80f48856d00d4baefbbc77f5", size = 268802, upload-time = "2026-10-06T05:10:42.549Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/18/00/6840f3565ba13bbb0ac08d5f1e8d6fad456a418f3c7dd406aa9d96cdffcc/oqtopus_auth-0.1.1-py3-none-any.whl", hash = "sha256:168a0482701f09b0c7e14d5d65e450b360d5a51e7d23921c930339408f594c78", size = 19596, upload-time = "2026-09-11T03:21:52.784Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/bf/199af471019aedb26c6e255d702dc95c08e529920d61335885f37163ed10/oqtopus_auth-1.0.0-py3-none-any.whl", hash = "sha256:1ee2f2efb6059b451fd931223c8451274e41a2728cb74be70f59f96592751723", size = 33308, upload-time = "2026-10-06T05:10:41.403Z" },
 ]
 
 [package.optional-dependencies]
@@ -924,7 +924,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "oqtopus-auth", extras = ["fastapi"], specifier = ">=0.1.1" },
+    { name = "oqtopus-auth", extras = ["fastapi"], specifier = ">=1.0.0" },
     { name = "oqtopus-util", specifier = ">=1.0.0" },
     { name = "python-json-logger", specifier = ">=4.1.0" },
     { name = "python-multipart", specifier = ">=0.0.29" },

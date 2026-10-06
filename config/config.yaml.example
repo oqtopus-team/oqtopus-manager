@@ -35,7 +35,7 @@ appearance:
 
 # Authentication settings
 auth:
-  provider: none  # "none" disables auth | "header" reads JWT from a proxy-injected header
+  provider: none  # "none" disables auth | "header" reads JWT from a proxy-injected header | "oidc" verifies a Bearer token
 
   # Active when provider: none
   none:
@@ -56,6 +56,18 @@ auth:
       # jwks_url: https://your-jwks-url/    # omit to derive from issuer automatically
       audience: your-audience               # e.g. Cognito App client ID
     # signout_url: https://your-signout-url/  # when set, adds a "Sign out" link to the sidebar
+
+  # Active when provider: oidc
+  oidc:
+    issuer: https://your-issuer-url/        # expected iss; JWKS is discovered from it
+    # jwks_url: https://your-jwks-url/      # explicit JWKS endpoint; skips discovery
+    audience: your-audience                 # expected aud; or set client_id (Cognito access tokens)
+    # client_id: your-client-id
+    # token_use: access                     # require token_use claim (Cognito)
+    algorithms: [RS256]                     # asymmetric algorithms only
+    required_scope: oqtopus-manager/access  # omit to disable the scope check
+    principal_claim: email                  # "sub" (default) | "email" | "azp" for M2M callers
+    roles_claim: "cognito:groups"           # optional; without roles, permission-protected endpoints are denied
 
   # Routes that skip authentication entirely, regardless of provider.
   public_paths:
