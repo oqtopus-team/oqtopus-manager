@@ -10,7 +10,7 @@ and check on a running environment.
 
 !!! note "Prerequisites"
     [Docker](https://docs.docker.com/get-docker/) must be installed and running. The `db` service runs MySQL
-    and MinIO as Docker containers.
+    and the object storage (SeaweedFS or MinIO) as Docker containers.
 
 ## Create
 
@@ -59,6 +59,23 @@ The list page reflects it too:
 
 ![Populated Cloud Local environment list, services running](../asset/screenshots/cloud_local_list_running.png)
 
+### Partially running `db`
+
+The `db` service is made of several Docker services (the database and the object storage). If only some of
+them are up, for example after one container was stopped by hand, `db` is shown in yellow as
+**Partially running**, followed by the state of each service as reported by `oqtopus cloud-local status`:
+
+![Cloud Local environment detail page, db partially running](../asset/screenshots/cloud_local_detail_partial.png)
+
+**Start**, **Stop** and **Restart** are all enabled for a partially running `db`. **Start** brings up the
+missing services, and **Stop** stops the running ones. A partially running service counts as running, so
+the environment cannot be deleted until it is stopped. On the list page, a partially running service turns
+the running count yellow.
+
+!!! note
+    `Stopped` can also mean the CLI could not determine the state of `db`. If `db` looks stopped but
+    containers are running, use **Stop** to bring it to a known state.
+
 ## View .env
 
 The **.env** button on the environment detail page opens the environment's `config/.env` file, with a
@@ -76,5 +93,5 @@ highlighting, auto-scroll, and download:
 ## Delete
 
 **Delete** on the list or detail page removes the environment's registration and on-disk directory after a
-confirmation prompt. If any service is still running, deletion fails with an error. Stop all services first,
+confirmation prompt. If any service is still running (or partially running), deletion fails with an error. Stop all services first,
 then delete.
