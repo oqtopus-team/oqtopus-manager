@@ -19,6 +19,7 @@ from oqtopus_manager.routers import backend as backend_pkg
 from oqtopus_manager.routers import cloud_local as cloud_local_pkg
 from oqtopus_manager.services.environment import check_reserved_environment_names
 from oqtopus_manager.services.locks import LockRegistry
+from oqtopus_manager.services.operations import OperationRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
     app.add_middleware(AuthMiddleware, auth_cfg=cfg.auth)
     app.state.config = cfg
     app.state.lock_registry = LockRegistry()
+    app.state.operation_registry = OperationRegistry(cfg.operation_buffer_lines)
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
     templates.env.globals["app_name"] = cfg.app_name
     templates.env.globals["has_app_icon"] = cfg.app_icon_path is not None

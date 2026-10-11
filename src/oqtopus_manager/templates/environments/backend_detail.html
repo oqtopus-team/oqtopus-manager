@@ -187,6 +187,40 @@
 
   </div>{# /ops-sections #}
 
+  {# Operations | install/update/build runs, running or recently finished; hidden without permission #}
+  <details id="sec-operations" data-sec="sec-operations" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group lg:col-span-2" open>
+    <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <h2 class="text-sm font-semibold text-[#4887FA]">Operations</h2>
+      <span id="ops-badge" class="hidden inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+        <span class="loading loading-spinner loading-xs"></span>
+        <span id="ops-badge-text"></span>
+      </span>
+    </summary>
+    <div>
+      <table class="w-full" style="border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td class="px-5 py-1.5" style="width:9rem">
+              <button onclick="fetchOperations(this)" class="btn btn-ghost btn-sm text-gray-400 hover:text-gray-600 gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+              </button>
+            </td>
+            <td class="py-1.5 text-xs text-gray-400" colspan="4">Install and build (and update via the API) runs in this environment. The 10 most recent finished ones stay viewable for 15 minutes.</td>
+          </tr>
+        </thead>
+        <tbody id="ops-table-wrap">
+          <tr><td colspan="5" class="px-5 py-2 text-sm text-gray-400">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
   {# Locks | full width, collapsed by default, badge only when something is held #}
   <details data-sec="sec-locks" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group lg:col-span-2">
     <summary class="flex items-center gap-2 px-5 py-3 cursor-pointer hover:bg-gray-50 transition-colors border-b border-transparent group-open:border-gray-200">
@@ -241,6 +275,11 @@
           <code id="force-unlock-lock-scope-text" class="font-mono text-xs bg-gray-100 rounded px-1"></code>
           lets a new operation start concurrently with it -- the same collision locking exists to
           prevent. Use only if you're confident the holder is stuck, not merely slow.
+        </p>
+        <p id="force-unlock-lock-op-warning" class="hidden text-sm text-red-600 font-medium mt-2">
+          This lock belongs to operation
+          <code id="force-unlock-lock-op-id" class="font-mono text-xs bg-red-50 rounded px-1"></code>,
+          which is still running. Its process will keep running after the unlock.
         </p>
       </div>
     </div>
@@ -351,7 +390,7 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     var comp  = document.getElementById('comp').value;
     var isAll = comp === 'all';
     var ver   = document.getElementById('ver');
-    ['btn-versions', 'btn-update', 'btn-uninstall'].forEach(function (btnId) {
+    ['btn-versions', 'btn-uninstall'].forEach(function (btnId) {
       var b = document.getElementById(btnId);
       if (b) b.disabled = isAll;
     });
@@ -462,31 +501,79 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     return { type: type, data: dataLines.join('\n') };
   }
 
-  function startStream(url, label, btnEl, onSuccess, onFinally, fetchOptions) {
+  function setConsoleStatus(text, cls) {
+    consoleStatus.textContent = text;
+    consoleStatus.className = cls;
+  }
+
+  // Starts a new console session, superseding (aborting) any previous one.
+  function openConsole(label, btnEl) {
     if (currentAbort) currentAbort.abort();
     var abort = new AbortController();
     currentAbort = abort;
     resetBtn(activeBtn);
     activeBtn = btnEl;
-    setBtnLoading(btnEl);
+    if (btnEl) setBtnLoading(btnEl);
 
     consoleArea.classList.remove('hidden');
     terminal.textContent = '';
     consoleCmd.textContent = 'oqtopus backend ' + label;
-    consoleStatus.textContent = 'Running…';
-    consoleStatus.className = 'text-xs text-gray-400';
+    setConsoleStatus('Running…', 'text-xs text-gray-400');
     consoleArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return abort;
+  }
 
-    function finish(ok, statusText) {
-      if (abort !== currentAbort) return; // superseded by a newer stream
-      currentAbort = null;
-      resetBtn(activeBtn); activeBtn = null;
-      consoleStatus.textContent = statusText;
-      consoleStatus.className = 'text-xs font-semibold ' + (ok ? 'text-green-600' : 'text-red-500');
-      if (ok && typeof onSuccess === 'function') onSuccess();
-      if (typeof onFinally === 'function') onFinally();
+  function finishConsole(abort, ok, statusText, onSuccess, onFinally) {
+    if (abort !== currentAbort) return; // superseded by a newer stream
+    currentAbort = null;
+    resetBtn(activeBtn); activeBtn = null;
+    setConsoleStatus(statusText, 'text-xs font-semibold ' + (ok ? 'text-green-600' : 'text-red-500'));
+    if (ok && typeof onSuccess === 'function') onSuccess();
+    if (typeof onFinally === 'function') onFinally();
+  }
+
+  function finishWithDone(abort, done, onSuccess, onFinally) {
+    var ok = done === 'success';
+    finishConsole(abort, ok, ok ? 'Done' : 'Failed', onSuccess, onFinally);
+  }
+
+  // Rejects with the error body's detail (RFC 9457 or HTTPException shape).
+  function responseError(res) {
+    return res.json().catch(function () { return {}; }).then(function (body) {
+      var err = new Error(body.detail || ('Request failed (' + res.status + ')'));
+      err.httpStatus = res.status;
+      throw err;
+    });
+  }
+
+  // Appends each SSE data line to the terminal. Resolves with the "done"
+  // event's data, or null if the stream closed without one.
+  function readSse(res) {
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+
+    function pump() {
+      return reader.read().then(function (result) {
+        if (result.done) return null;
+        buffer += decoder.decode(result.value, { stream: true });
+        var idx;
+        while ((idx = buffer.indexOf('\n\n')) >= 0) {
+          var evt = parseSseEvent(buffer.slice(0, idx));
+          buffer = buffer.slice(idx + 2);
+          if (evt.type === 'done') return evt.data;
+          terminal.textContent += evt.data + '\n';
+          terminal.scrollTop = terminal.scrollHeight;
+        }
+        return pump();
+      });
     }
+    return pump();
+  }
 
+  // Short operations: the output streams back in the POST response itself.
+  function startStream(url, label, btnEl, onSuccess, onFinally, fetchOptions) {
+    var abort = openConsole(label, btnEl);
     var opts = { signal: abort.signal };
     if (fetchOptions && fetchOptions.method) opts.method = fetchOptions.method;
     if (fetchOptions && fetchOptions.body !== undefined) {
@@ -495,54 +582,89 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     }
 
     fetch(url, opts)
-      .then(function (res) {
-        if (!res.ok) {
-          return res.json().catch(function () { return {}; }).then(function (body) {
-            throw new Error(body.detail || ('Request failed (' + res.status + ')'));
-          });
-        }
-        var reader = res.body.getReader();
-        var decoder = new TextDecoder();
-        var buffer = '';
-
-        function pump() {
-          return reader.read().then(function (result) {
-            if (result.done) {
-              // Stream closed without ever sending a "done" SSE event.
-              finish(false, 'Connection error');
-              return;
-            }
-            buffer += decoder.decode(result.value, { stream: true });
-            var idx;
-            while ((idx = buffer.indexOf('\n\n')) >= 0) {
-              var evt = parseSseEvent(buffer.slice(0, idx));
-              buffer = buffer.slice(idx + 2);
-              if (evt.type === 'done') {
-                finish(evt.data === 'success', evt.data === 'success' ? 'Done' : 'Failed');
-                return;
-              }
-              terminal.textContent += evt.data + '\n';
-              terminal.scrollTop = terminal.scrollHeight;
-            }
-            return pump();
-          });
-        }
-        return pump();
+      .then(function (res) { return res.ok ? readSse(res) : responseError(res); })
+      .then(function (done) {
+        if (done === null) finishConsole(abort, false, 'Connection error', onSuccess, onFinally);
+        else finishWithDone(abort, done, onSuccess, onFinally);
       })
       .catch(function (err) {
         if (err && err.name === 'AbortError') return; // superseded; stay silent
-        if (abort !== currentAbort) return;
-        currentAbort = null;
-        resetBtn(activeBtn); activeBtn = null;
-        consoleStatus.textContent = (err && err.message) || 'Connection error';
-        consoleStatus.className = 'text-xs text-red-500 font-semibold';
-        if (typeof onFinally === 'function') onFinally();
+        finishConsole(abort, false, (err && err.message) || 'Connection error', null, onFinally);
       });
   }
 
+  var opsUrl = '/api/backend/' + envName + '/operations';
+  var MAX_RECONNECTS = 5;
+
+  // Long operations (install/update/build): the POST only answers 202 with an
+  // operation ID; the output is followed separately via followOperation.
+  function startOperation(url, label, btnEl, body, onSuccess, onFinally) {
+    var abort = openConsole(label, btnEl);
+    var opts = { method: 'POST', signal: abort.signal };
+    if (body !== undefined) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    fetch(url, opts)
+      .then(function (res) { return res.ok ? res.json() : responseError(res); })
+      .then(function (data) {
+        window.fetchOperations(null);
+        followOperation(abort, data.operation_id, onSuccess, onFinally);
+      })
+      .catch(function (err) {
+        if (err && err.name === 'AbortError') return;
+        finishConsole(abort, false, (err && err.message) || 'Connection error', null, onFinally);
+      });
+  }
+
+  // The server replays the operation's buffered output on every connection,
+  // so a dropped connection is simply reopened (redrawing the terminal) until
+  // the "done" event arrives. Closing the tab never affects the operation.
+  function followOperation(abort, operationId, onSuccess, onFinally) {
+    var failures = 0;
+
+    function connect() {
+      if (abort !== currentAbort) return;
+      fetch(opsUrl + '/' + encodeURIComponent(operationId) + '/stream', { signal: abort.signal })
+        .then(function (res) {
+          if (!res.ok) return responseError(res);
+          failures = 0;
+          terminal.textContent = '';
+          setConsoleStatus('Running…', 'text-xs text-gray-400');
+          return readSse(res);
+        })
+        .then(function (done) {
+          if (done === null) { retry(); return; }
+          finishWithDone(abort, done, onSuccess, onFinally);
+          window.fetchOperations(null);
+        })
+        .catch(function (err) {
+          if (err && err.name === 'AbortError') return;
+          // The server answered (e.g. 404 after expiry): reconnecting won't help.
+          if (err && err.httpStatus) {
+            finishConsole(abort, false, err.message, null, onFinally);
+            return;
+          }
+          retry();
+        });
+    }
+
+    function retry() {
+      if (abort !== currentAbort) return;
+      failures += 1;
+      if (failures > MAX_RECONNECTS) {
+        finishConsole(abort, false, 'Connection lost', null, onFinally);
+        return;
+      }
+      setConsoleStatus('Reconnecting… (' + failures + '/' + MAX_RECONNECTS + ')', 'text-xs text-amber-600');
+      setTimeout(connect, 2000);
+    }
+
+    connect();
+  }
+
   window.runCmd = function (btn) {
-    startStream('/api/backend/' + envName + '/build-sse-runtime', 'build sse-runtime', btn,
-      null, null, { method: 'POST' });
+    startOperation('/api/backend/' + envName + '/build-sse-runtime', 'build sse-runtime', btn);
   };
   window.runServiceCmdFor = function (action, svc, btn) {
     var url = '/api/backend/' + envName + '/services/' + encodeURIComponent(svc) + '/' + action;
@@ -557,20 +679,21 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     var skipSseBuild = action === 'install' && comp === 'engine'
       && document.getElementById('chk-skip-sse-build').checked;
     var label = action + ' ' + comp + (ver ? ' ' + ver : '') + (skipSseBuild ? ' --skip-sse-build' : '');
-    var needsRefresh = (action === 'install' || action === 'update' || action === 'uninstall');
+    var needsRefresh = (action === 'install' || action === 'uninstall');
     var compBtnIds = ['btn-versions', 'btn-install', 'btn-uninstall'];
     compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = true; });
     var url = '/api/backend/' + envName + '/components/' + encodeURIComponent(comp) + '/' + action;
-    var body;
-    if (action === 'install') body = { version: ver, skip_sse_build: skipSseBuild };
-    else if (action === 'uninstall') body = { version: ver };
-    startStream(url, label, btn,
-      needsRefresh ? fetchSettings : null,
-      function () {
-        compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
-        syncCompState();
-      },
-      { method: 'POST', body: body });
+    var onSuccess = needsRefresh ? fetchSettings : null;
+    var onFinally = function () {
+      compBtnIds.forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = false; });
+      syncCompState();
+    };
+    if (action === 'uninstall') {
+      startStream(url, label, btn, onSuccess, onFinally, { method: 'POST', body: { version: ver } });
+      return;
+    }
+    var body = action === 'install' ? { version: ver, skip_sse_build: skipSseBuild } : undefined;
+    startOperation(url, label, btn, body, onSuccess, onFinally);
   };
 
   var _VALID_COMP = new Set({{ components | tojson }});
@@ -609,7 +732,8 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   };
 
   function escapeHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   function renderStatusTable(services) {
@@ -719,6 +843,7 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   function renderLocksTable(locks) {
     var badge = document.getElementById('locks-badge');
     var wrap = document.getElementById('locks-table-wrap');
+    _lockOperationIds = {};
     if (!locks.length) {
       badge.classList.add('hidden');
       wrap.innerHTML = '<tr><td colspan="5" class="px-5 py-2 text-sm text-gray-400">No locks currently held.</td></tr>';
@@ -729,10 +854,14 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
       locks.length + (locks.length === 1 ? ' lock active' : ' locks active');
     var html = '';
     locks.forEach(function (l) {
+      if (l.operation_id) _lockOperationIds[l.scope] = l.operation_id;
+      var opNote = l.operation_id
+        ? '<div class="text-xs text-gray-400 font-mono">operation ' + escapeHtml(l.operation_id.slice(0, 8)) + '</div>'
+        : '';
       html += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
         '<td class="px-5 py-1.5 text-sm font-mono text-gray-600">' + escapeHtml(l.scope) + '</td>' +
-        '<td class="py-1.5 text-sm text-gray-600">' + escapeHtml(l.operation) + '</td>' +
-        '<td class="py-1.5 text-sm text-gray-500">' + escapeHtml(l.held_by) + '</td>' +
+        '<td class="py-1.5 text-sm text-gray-600">' + escapeHtml(l.operation) + opNote + '</td>' +
+        '<td class="py-1.5 pr-4 text-sm text-gray-500" style="white-space:nowrap">' + escapeHtml(l.held_by) + '</td>' +
         '<td class="py-1.5 text-sm text-gray-400" style="white-space:nowrap">' + escapeHtml(l.held_since) + '</td>' +
         '<td class="py-1.5 pr-5" style="width:1px; white-space:nowrap">' +
         '<button onclick="forceUnlockScope(this.dataset.scope)" data-scope="' + escapeHtml(l.scope) + '" class="btn btn-xs btn-outline btn-error">Force unlock</button>' +
@@ -741,6 +870,80 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     });
     wrap.innerHTML = html;
   }
+
+  var _lockOperationIds = {};
+  var _operationsById = {};
+  var _operationsAllowed = true;
+
+  var OP_STATUS_CLASS = {
+    running: 'text-amber-600',
+    success: 'text-green-600',
+    error: 'text-red-500',
+    timeout: 'text-red-500'
+  };
+
+  function renderOperationsTable(ops) {
+    var badge = document.getElementById('ops-badge');
+    var wrap = document.getElementById('ops-table-wrap');
+    var running = ops.filter(function (o) { return o.status === 'running'; }).length;
+    badge.classList.toggle('hidden', running === 0);
+    document.getElementById('ops-badge-text').textContent = running + ' running';
+    _operationsById = {};
+    if (!ops.length) {
+      wrap.innerHTML = '<tr><td colspan="5" class="px-5 py-2 text-sm text-gray-400">No recent operations.</td></tr>';
+      return;
+    }
+    var html = '';
+    ops.forEach(function (o) {
+      _operationsById[o.operation_id] = o;
+      var forced = o.lock_force_released
+        ? ' <span class="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-1">lock force-released</span>'
+        : '';
+      var when = o.finished_at ? o.started_at + ' – ' + o.finished_at : o.started_at;
+      // Only the hex operation ID goes into an attribute; the label (which
+      // includes the user-typed version) is looked up from _operationsById.
+      html += '<tr style="border-bottom: 1px solid #e5e7eb;">' +
+        '<td class="px-5 py-1.5 text-sm font-mono text-gray-600" style="white-space:nowrap">' + escapeHtml(o.label) + forced + '</td>' +
+        '<td class="py-1.5 text-sm font-semibold ' + (OP_STATUS_CLASS[o.status] || 'text-gray-500') + '">' + escapeHtml(o.status) + '</td>' +
+        '<td class="py-1.5 pr-4 text-sm text-gray-500" style="white-space:nowrap">' + escapeHtml(o.started_by) + '</td>' +
+        '<td class="py-1.5 text-sm text-gray-400" style="white-space:nowrap">' + escapeHtml(when) + '</td>' +
+        '<td class="py-1.5 pr-5" style="width:1px; white-space:nowrap">' +
+        '<button onclick="viewOperation(this.dataset.op)" data-op="' + escapeHtml(o.operation_id) + '" class="btn btn-xs btn-outline">View output</button>' +
+        '</td>' +
+        '</tr>';
+    });
+    wrap.innerHTML = html;
+  }
+
+  window.fetchOperations = function (btn) {
+    if (!_operationsAllowed) return;
+    var icon = btn ? btn.querySelector('svg') : null;
+    if (btn) btn.disabled = true;
+    if (icon) icon.classList.add('animate-spin');
+    function done() {
+      if (btn) btn.disabled = false;
+      if (icon) icon.classList.remove('animate-spin');
+    }
+    fetch(opsUrl)
+      .then(function (r) {
+        if (r.status === 403) {
+          // No environment.component.manage: hide the panel and stop polling.
+          _operationsAllowed = false;
+          document.getElementById('sec-operations').classList.add('hidden');
+          return null;
+        }
+        if (!r.ok) throw new Error('operations fetch failed');
+        return r.json();
+      })
+      .then(function (ops) { done(); if (ops) renderOperationsTable(ops); })
+      .catch(done);
+  };
+
+  window.viewOperation = function (operationId) {
+    var op = _operationsById[operationId];
+    var abort = openConsole(op ? op.label : 'operation ' + operationId, null);
+    followOperation(abort, operationId, fetchSettings, null);
+  };
 
   window.fetchLocks = function (btn) {
     var icon = btn ? btn.querySelector('svg') : null;
@@ -763,6 +966,9 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
   window.forceUnlockScope = function (scope) {
     _pendingUnlockScope = scope;
     document.getElementById('force-unlock-lock-scope-text').textContent = scope;
+    var opId = _lockOperationIds[scope];
+    document.getElementById('force-unlock-lock-op-id').textContent = opId || '';
+    document.getElementById('force-unlock-lock-op-warning').classList.toggle('hidden', !opId);
     document.getElementById('force-unlock-lock-modal').classList.remove('hidden');
   };
   window.closeForceUnlockLockModal = function () {
@@ -775,12 +981,13 @@ var resolvedRootPath = {{ resolved_root_path | string | tojson }};
     _pendingUnlockScope = null;
     if (!scope) return;
     fetch('/api/backend/' + envName + '/locks/force-unlock?' + new URLSearchParams({ scope: scope }), { method: 'POST' })
-      .then(function () { window.fetchLocks(null); });
+      .then(function () { window.fetchLocks(null); window.fetchOperations(null); });
   };
 
   fetchSettings();
   window.fetchLocks(null);
-  setInterval(function () { window.fetchLocks(null); }, 5000);
+  window.fetchOperations(null);
+  setInterval(function () { window.fetchLocks(null); window.fetchOperations(null); }, 5000);
 
   window.toggleFullscreen = function () {
     var ca = document.getElementById('console-area');

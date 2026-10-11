@@ -24,6 +24,7 @@ def _write_config(config_dir: pathlib.Path, envs_path: str = "./environments.yam
                 "behavior": {
                     "log_tail_lines": 100,
                     "log_buffer_lines": 1000,
+                    "operation_buffer_lines": 1000,
                     "file_edit_lock_timeout_sec": 600,
                 },
                 "appearance": {
@@ -85,6 +86,7 @@ def test_host_port_custom(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatc
                 "behavior": {
                     "log_tail_lines": 100,
                     "log_buffer_lines": 1000,
+                    "operation_buffer_lines": 1000,
                     "file_edit_lock_timeout_sec": 600,
                 },
                 "appearance": {
@@ -167,6 +169,7 @@ def test_load_without_permissions_sets_none(tmp_path: pathlib.Path, monkeypatch:
                 "behavior": {
                     "log_tail_lines": 100,
                     "log_buffer_lines": 1000,
+                    "operation_buffer_lines": 1000,
                     "file_edit_lock_timeout_sec": 600,
                 },
                 "appearance": {

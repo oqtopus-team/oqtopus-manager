@@ -36,14 +36,17 @@ pinned to a specific version:
 ![Backend environment detail page, components not installed](../asset/screenshots/backend_detail_not_installed.png)
 
 Pick a component (or `all`), optionally a version, and click **Install**. Installing runs `oqtopus backend
-install` and streams its output the same way environment creation does.
+install` and shows its output in the console. Leaving the version empty installs the latest release; this
+is also how you upgrade a component to the latest release (the same thing `oqtopus backend update` does). Install keeps running on the server even if you close the tab,
+and you can reopen its output from the **Operations** panel — see
+[Long-running Operations](operations.md).
 
 Once `engine` is installed, **Build SSE Runtime** becomes available. Click it to build the Docker image the
-`sse_engine` service uses to run submitted programs.
+`sse_engine` service uses to run submitted programs. It runs the same way as install.
 
 !!! note
-    Installing (or building) the same component from two environments at once makes the second one
-    wait for the first to finish — see [Exclusive Locks](locks.md).
+    Installing (or building) the same component from two environments at once is refused: the second
+    request gets an error saying which operation holds the component — see [Exclusive Locks](locks.md).
 
 ## Start services
 

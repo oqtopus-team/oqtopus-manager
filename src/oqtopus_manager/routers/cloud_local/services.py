@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from oqtopus_auth.fastapi import require_permission
 from pydantic import BaseModel
 
@@ -18,9 +18,6 @@ from oqtopus_manager.routers._utils import (
 from oqtopus_manager.services import cloud_local as cloud_local_service
 from oqtopus_manager.services import environment as env_service
 from oqtopus_manager.services.exceptions import ServiceError
-
-if TYPE_CHECKING:
-    from fastapi.responses import StreamingResponse
 
 api_router = APIRouter(prefix="/api/cloud-local", tags=["cloud-local-api"])
 logger = logging.getLogger(__name__)

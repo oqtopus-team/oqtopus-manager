@@ -65,7 +65,7 @@ Adding or removing a permission requires a code change.
 | `environment.config.update` | Edit and save configuration files |
 | `environment.log.get` | View, stream, and download service logs |
 | `environment.service.control` | Control services: start, stop, restart, and device status |
-| `environment.component.manage` | Manage components: install, uninstall, update, and build SSE runtime |
+| `environment.component.manage` | Manage components: install, uninstall, update, and build SSE runtime; list and watch install/update/build [operations](operations.md) |
 | `environment.locks.manage` | Force-unlock a stuck operation lock |
 | `app_settings.get` | View OQTOPUS Manager configuration |
 | `app_settings.update` | Edit OQTOPUS Manager configuration *(admin only)* |

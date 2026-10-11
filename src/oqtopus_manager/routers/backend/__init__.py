@@ -3,6 +3,9 @@
 from oqtopus_manager.routers.backend.components import (
     api_router as components_api_router,
 )
+from oqtopus_manager.routers.backend.components import (
+    operations_api_router,
+)
 from oqtopus_manager.routers.backend.detail import api_router as detail_api_router
 from oqtopus_manager.routers.backend.detail import router as detail_router
 from oqtopus_manager.routers.backend.dotenv import api_router as dotenv_api_router
@@ -30,4 +33,5 @@ api_routers = [  # ruff: ignore[non-empty-init-module]
     log_api_router,
     services_api_router,
     components_api_router,
+    operations_api_router,
 ]

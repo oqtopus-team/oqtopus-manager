@@ -182,6 +182,112 @@ async def test_stream_command_timeout_without_lock_still_kills_process(
     assert any("event: done" in c and "timeout" in c for c in chunks)
 
 
+def _alive(pid: int) -> bool:
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+async def _wait_gone(pid: int, limit: float = 2.0) -> bool:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + limit
+    while _alive(pid):
+        if loop.time() > deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
+@pytest.mark.anyio
+async def test_stream_command_timeout_kills_descendants_too(
+    tmp_path: pathlib.Path,
+) -> None:
+    # The background sleep stands in for e.g. a docker build the CLI started:
+    # it holds stdout open, so killing only the CLI would leave it running
+    # and keep the lock held until it finished on its own.
+    pid_file = tmp_path / "child.pid"
+    lock = _FakeLock()
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    chunks = await _collect(
+        _stream_command(
+            ["sh", "-c", f"sleep 30 & echo $! > {pid_file}; sleep 30"],
+            tmp_path,
+            timeout=0.2,
+            lock=lock,
+        )
+    )
+    assert loop.time() - started < 5
+    assert chunks[-1] == "event: done\ndata: timeout\n\n"
+    assert lock.exited is True
+    assert await _wait_gone(int(pid_file.read_text(encoding="utf-8")))
+
+
+@pytest.mark.anyio
+async def test_stream_command_timeout_escalates_to_sigkill(
+    tmp_path: pathlib.Path, mocker: MockerFixture
+) -> None:
+    mocker.patch("oqtopus_manager.util.cli._KILL_GRACE_SEC", 0.2)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    # Ignored signals are inherited across exec, so sleep ignores SIGTERM too.
+    chunks = await _collect(
+        _stream_command(
+            ["sh", "-c", "trap '' TERM; sleep 30"], tmp_path, timeout=0.2
+        )
+    )
+    assert loop.time() - started < 5
+    assert chunks[-1] == "event: done\ndata: timeout\n\n"
+
+
+@pytest.mark.anyio
+async def test_stream_command_normal_exit_leaves_descendants_running(
+    tmp_path: pathlib.Path,
+) -> None:
+    # A process the CLI deliberately leaves behind (e.g. a started service,
+    # detached from stdout) outliving the timeout must not be killed: only
+    # the CLI's own exit counts against the timeout.
+    pid_file = tmp_path / "child.pid"
+    chunks = await _collect(
+        _stream_command(
+            [
+                "sh",
+                "-c",
+                f"sleep 2 >/dev/null 2>&1 & echo $! > {pid_file}",
+            ],
+            tmp_path,
+            timeout=0.5,
+        )
+    )
+    assert chunks[-1] == "event: done\ndata: success\n\n"
+    pid = int(pid_file.read_text(encoding="utf-8"))
+    await asyncio.sleep(0.8)
+    assert _alive(pid)
+    assert await _wait_gone(pid, limit=5)
+
+
+@pytest.mark.anyio
+async def test_stream_command_finishes_when_cli_exits_despite_open_pipe(
+    tmp_path: pathlib.Path,
+) -> None:
+    # The CLI exits, but a process it left behind still holds stdout open.
+    # The command counts as finished (and its lock is released) at the CLI's
+    # exit, not whenever that leftover process eventually closes the pipe.
+    lock = _FakeLock()
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    chunks = await _collect(
+        _stream_command(
+            ["sh", "-c", "sleep 3 & echo hi"], tmp_path, timeout=10, lock=lock
+        )
+    )
+    assert loop.time() - started < 1.5
+    assert chunks == ["data: hi\n\n", "event: done\ndata: success\n\n"]
+    assert lock.exited is True
+
+
 # ── stream_oqtopus_init ───────────────────────────────────────────────────────
 
 

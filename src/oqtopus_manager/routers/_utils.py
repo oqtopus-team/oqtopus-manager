@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from oqtopus_manager.config import AppConfig
     from oqtopus_manager.services.locks import LockRegistry
+    from oqtopus_manager.services.operations import OperationRegistry
 
 
 def _get_templates(request: Request) -> Jinja2Templates:
@@ -31,6 +32,10 @@ def _get_config(request: Request) -> AppConfig:
 
 def _get_lock_registry(request: Request) -> LockRegistry:
     return request.app.state.lock_registry
+
+
+def _get_operation_registry(request: Request) -> OperationRegistry:
+    return request.app.state.operation_registry
 
 
 def _get_held_by(request: Request) -> str:

@@ -31,6 +31,10 @@ class AppConfig(BaseModel):
     port: int
     log_tail_lines: int
     log_buffer_lines: int
+    # Server-side ring buffer per install/update/build operation, replayed
+    # on reconnect. Unrelated to log_buffer_lines, which only caps how many
+    # lines the browser's log viewer keeps on screen.
+    operation_buffer_lines: int
     app_name: str
     app_icon_path: pathlib.Path | None
     favicon_path: pathlib.Path | None
@@ -74,6 +78,7 @@ class AppConfig(BaseModel):
             port=server["port"],
             log_tail_lines=behavior["log_tail_lines"],
             log_buffer_lines=behavior["log_buffer_lines"],
+            operation_buffer_lines=behavior["operation_buffer_lines"],
             app_name=appearance["app_name"],
             app_icon_path=(
                 (cwd / pathlib.Path(appearance["app_icon_path"])).resolve()

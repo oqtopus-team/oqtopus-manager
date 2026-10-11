@@ -228,6 +228,7 @@
       consoleFooter.classList.remove("hidden");
       consoleMessage.innerHTML = 'Completed successfully. <a href="' + htmlUrlPrefix + '/' + encodeURIComponent(name) + '" class="btn btn-primary btn-outline btn-sm ml-2">'
         + 'Open ' + name.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          .replace(/"/g,'&quot;').replace(/'/g,'&#39;')
         + '</a>';
       consoleMessage.className = "text-sm text-green-700 flex items-center";
     }

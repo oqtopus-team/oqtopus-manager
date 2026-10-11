@@ -87,7 +87,8 @@
     if (!el) return;
     if (!outcome) { el.innerHTML = ''; return; }
     if (outcome.error) {
-      el.innerHTML = '<span class="text-red-400 text-xs">' + (outcome.error.title || 'error') + '</span>';
+      el.innerHTML = '<span class="text-red-400 text-xs"></span>';
+      el.firstChild.textContent = outcome.error.title || 'error';
       return;
     }
     var services = outcome.data.services;
@@ -107,7 +108,9 @@
     var cls = status === 'active'   ? 'text-green-600 font-medium'
             : status === 'inactive' ? 'text-red-500 font-medium'
             :                         'text-yellow-600 font-medium';
-    el.innerHTML = '<span class="' + cls + '">' + status + '</span>';
+    // device_status is CLI output, so set it as text rather than markup.
+    el.innerHTML = '<span class="' + cls + '"></span>';
+    el.firstChild.textContent = status;
   }
 
   // One request for the whole page instead of 2N Server-Sent Events connections.

@@ -8,12 +8,12 @@ from oqtopus_manager.services.cloud_local import (
     build_component_args,
     build_service_args,
     component_lock_for,
-    install_lock_for,
+    install_lock_scope,
     service_lock_for,
     validate_component,
 )
 from oqtopus_manager.services.exceptions import InvalidArgumentError
-from oqtopus_manager.services.locks import LockRegistry
+from oqtopus_manager.services.locks import LockRegistry, LockScope
 
 
 class TestValidateComponent:
@@ -111,20 +111,26 @@ class TestServiceLockFor:
             assert info.scope == "cloud/*"
 
 
-class TestInstallLockFor:
+class TestInstallLockScope:
     @pytest.mark.anyio
     async def test_all_locks_every_component_and_env(self) -> None:
         registry = LockRegistry()
-        async with install_lock_for(
-            registry, "cloud", "all", operation="op", held_by="u"
-        ):
-            scopes = {info.scope for info in registry.snapshot()}
-            assert scopes == {
-                "component:cloud",
-                "component:frontend",
-                "component:admin",
-                "environment:cloud",
-            }
+        held = await registry.try_acquire(
+            install_lock_scope("cloud", "all"), operation="op", held_by="u"
+        )
+        scopes = {info.scope for info in registry.snapshot()}
+        await held.release()
+        assert scopes == {
+            "component:cloud",
+            "component:frontend",
+            "component:admin",
+            "environment:cloud",
+        }
+
+    def test_specific_component_locks_component_and_env(self) -> None:
+        assert install_lock_scope("cloud", "admin") == LockScope(
+            components=("admin",), environment="cloud"
+        )
 
 
 class TestComponentLockFor:

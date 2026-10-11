@@ -33,6 +33,7 @@ def client(
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {
