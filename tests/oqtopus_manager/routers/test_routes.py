@@ -615,6 +615,72 @@ def test_settings_page_renders(client: TestClient) -> None:
     assert b"oqtopus" in resp.content or resp.status_code == 200
 
 
+def test_settings_page_shows_manager_info(
+    client: TestClient, mocker: MockerFixture
+) -> None:
+    info = (
+        "template=manager\n"
+        "manager_version=v0.1.1\n"
+        "environment_root=/home/user/myenv\n"
+    )
+    mocker.patch(
+        "oqtopus_manager.routers.app_settings._run_manager_info", return_value=info
+    )
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    assert 'data-sec="appsettings-manager"' in resp.text
+    assert ">manager_version</dt>" in resp.text
+    assert ">v0.1.1</dd>" in resp.text
+    assert "/home/user/myenv/.metadata" in resp.text
+
+
+def test_settings_page_hides_manager_info_when_info_fails(
+    client: TestClient, mocker: MockerFixture
+) -> None:
+    mocker.patch(
+        "oqtopus_manager.routers.app_settings._run_manager_info", return_value=None
+    )
+    resp = client.get("/settings")
+    assert resp.status_code == 200
+    assert 'data-sec="appsettings-manager"' not in resp.text
+
+
+@pytest.mark.anyio
+async def test_run_manager_info_returns_none_on_nonzero_exit(
+    mocker: MockerFixture,
+) -> None:
+    from oqtopus_manager.routers.app_settings import _run_manager_info
+
+    proc = mocker.MagicMock(returncode=1)
+    proc.communicate = mocker.AsyncMock(
+        return_value=(b"", b"Error: .metadata not found.\n")
+    )
+    mocker.patch("asyncio.create_subprocess_exec", return_value=proc)
+    assert await _run_manager_info() is None
+
+
+@pytest.mark.anyio
+async def test_run_manager_info_returns_stdout_on_success(
+    mocker: MockerFixture,
+) -> None:
+    from oqtopus_manager.routers.app_settings import _run_manager_info
+
+    proc = mocker.MagicMock(returncode=0)
+    proc.communicate = mocker.AsyncMock(return_value=(b"template=manager\n", b""))
+    mocker.patch("asyncio.create_subprocess_exec", return_value=proc)
+    assert await _run_manager_info() == "template=manager"
+
+
+@pytest.mark.anyio
+async def test_run_manager_info_returns_none_when_cli_missing(
+    mocker: MockerFixture,
+) -> None:
+    from oqtopus_manager.routers.app_settings import _run_manager_info
+
+    mocker.patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError)
+    assert await _run_manager_info() is None
+
+
 def test_settings_lock_acquire_and_release(
     client: TestClient, tmp_path: pathlib.Path
 ) -> None:

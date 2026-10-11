@@ -16,7 +16,17 @@ The following sections describe the configuration options for each section.
 `config.yaml` and `logging.yaml` can also be viewed (and, for admins, edited) from the **Settings** page in the
 application itself, at `/settings`:
 
-![Settings page showing config.yaml and logging.yaml](../asset/screenshots/app_settings_admin.png)
+![Settings page showing the OQTOPUS Manager environment metadata, config.yaml and logging.yaml](../asset/screenshots/app_settings_admin.png)
+
+The Settings page also shows, read-only:
+
+- **OQTOPUS CLI**: the version and path of the `oqtopus` command the application uses.
+- **OQTOPUS Manager**: the output of `oqtopus manager info`, i.e. the `.metadata` of the environment the
+  application was installed into (installed version, install root, environment root, and so on). This section is
+  shown only when the command succeeds, so it is hidden when the application is not running from an OQTOPUS
+  manager environment (for example, when started with `make run` from a source checkout).
+- **environments.yaml** (the file set by `environments_file`): the registry of environments managed by the
+  application.
 
 !!! note
     Saving `config.yaml` from the Settings page only writes the file to disk. Run `oqtopus manager restart`
