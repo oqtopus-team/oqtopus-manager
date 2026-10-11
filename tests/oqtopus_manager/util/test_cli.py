@@ -283,9 +283,37 @@ async def test_stream_command_finishes_when_cli_exits_despite_open_pipe(
             ["sh", "-c", "sleep 3 & echo hi"], tmp_path, timeout=10, lock=lock
         )
     )
-    assert loop.time() - started < 1.5
+    # Not 3 s: the stream ends one EOF grace period after the CLI exits.
+    assert loop.time() - started < 2.5
     assert chunks == ["data: hi\n\n", "event: done\ndata: success\n\n"]
     assert lock.exited is True
+
+
+@pytest.mark.anyio
+async def test_stream_command_keeps_all_output_written_right_before_exit(
+    tmp_path: pathlib.Path,
+) -> None:
+    chunks = await _collect(_stream_command(["seq", "1", "20000"], tmp_path))
+    assert len(chunks) == 20001
+    assert chunks[0] == "data: 1\n\n"
+    assert chunks[-2] == "data: 20000\n\n"
+    assert chunks[-1] == "event: done\ndata: success\n\n"
+
+
+@pytest.mark.anyio
+async def test_stream_command_reads_output_arriving_shortly_after_exit(
+    tmp_path: pathlib.Path,
+) -> None:
+    # Output that reaches the pipe a moment after the CLI exits (here from a
+    # leftover child; under load, from a delayed read) is still delivered.
+    chunks = await _collect(
+        _stream_command(["sh", "-c", "(sleep 0.3; echo late) & echo early"], tmp_path)
+    )
+    assert chunks == [
+        "data: early\n\n",
+        "data: late\n\n",
+        "event: done\ndata: success\n\n",
+    ]
 
 
 # ── stream_oqtopus_init ───────────────────────────────────────────────────────

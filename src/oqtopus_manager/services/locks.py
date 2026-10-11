@@ -336,8 +336,8 @@ class LockRegistry:
 
         Uses the same fixed order as the combined methods above (components
         sorted, then the environment). Never waits, so it cannot deadlock
-        against them; on the first lock found busy it releases whatever it
-        already took.
+        against them. On the first lock found busy -- or if the caller is
+        cancelled part-way -- it releases whatever it already took.
 
         Returns:
             The held locks, to be released by the caller via ``release()``.
@@ -350,13 +350,23 @@ class LockRegistry:
         if scope.environment is not None:
             locks.append(await self._environment(scope.environment))
         held: list[tuple[_NamedLock, LockInfo]] = []
-        for lock in locks:
-            info = await lock.try_acquire(operation=operation, held_by=held_by)
-            if info is None:
-                holder = lock.info
-                await HeldLocks(held).release()
-                raise LockBusyError(lock.scope, holder)
-            held.append((lock, info))
+        busy: _NamedLock | None = None
+        try:
+            for lock in locks:
+                info = await lock.try_acquire(operation=operation, held_by=held_by)
+                if info is None:
+                    busy = lock
+                    break
+                held.append((lock, info))
+        except BaseException:
+            # Cancelled part-way (e.g. the request was abandoned): give back
+            # whatever was taken, so no partial scope lingers.
+            await HeldLocks(held).release()
+            raise
+        if busy is not None:
+            holder = busy.info
+            await HeldLocks(held).release()
+            raise LockBusyError(busy.scope, holder)
         return HeldLocks(held)
 
     # ── introspection / force-unlock ─────────────────────────────────────

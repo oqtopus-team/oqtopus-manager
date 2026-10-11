@@ -25,6 +25,7 @@ def _request(  # ruff: ignore[too-many-arguments]
     environment: str = "demo",
     components: tuple[str, ...] = ("engine",),
     timeout: float | None = None,
+    started_by: str = "alice",
 ) -> OperationRequest:
     return OperationRequest(
         key=OperationKey(template="backend", environment=environment, args=args),
@@ -36,7 +37,7 @@ def _request(  # ruff: ignore[too-many-arguments]
         timeout=timeout,
         lock_scope=LockScope(components=components, environment=environment),
         label=f"{' '.join(args)} (environment={environment})",
-        started_by="alice",
+        started_by=started_by,
     )
 
 
@@ -151,6 +152,26 @@ async def test_identical_request_joins_the_running_operation(
     second, joined = await registry.start(_request(tmp_path, "sleep 0.3"), locks)
     assert joined is True
     assert second is first
+    await _collect(first)
+
+
+@pytest.mark.anyio
+async def test_identical_request_from_another_user_joins(
+    tmp_path: pathlib.Path,
+) -> None:
+    # The key is (template, environment, CLI args): who asks doesn't matter,
+    # and the operation keeps reporting the user who actually started it.
+    registry = OperationRegistry(buffer_lines=100)
+    locks = LockRegistry()
+    first, _ = await registry.start(
+        _request(tmp_path, "sleep 0.3", started_by="alice"), locks
+    )
+    second, joined = await registry.start(
+        _request(tmp_path, "sleep 0.3", started_by="bob"), locks
+    )
+    assert joined is True
+    assert second is first
+    assert first.to_dict()["started_by"] == "alice"
     await _collect(first)
 
 

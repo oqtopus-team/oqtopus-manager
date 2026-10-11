@@ -175,8 +175,11 @@ see [Permissions](permissions.md).
   directly on the host, outside of Manager, bypasses them entirely.
 - A process that detaches itself into a new session (as daemons do) escapes the timeout's
   process-group stop, and keeps running after the operation has timed out.
-- Locks don't coordinate across multiple Manager processes sharing the same filesystem (not a
-  supported deployment today).
+- **Manager must run as a single process.** Locks don't coordinate across multiple Manager
+  processes sharing the same filesystem, and that includes running Manager behind a server with
+  several workers (e.g. `uvicorn --workers N`). Each worker would keep its own locks, so two
+  workers could run conflicting operations at once. The default `python -m oqtopus_manager.main`
+  (`make run`) starts a single process.
 
 For implementation details (the `LockRegistry` API, how it wires into the streaming CLI wrapper,
 and how to add locking to a new operation), see

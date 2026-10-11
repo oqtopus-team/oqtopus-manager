@@ -292,6 +292,36 @@ async def test_try_acquire_fails_fast_and_takes_nothing_when_busy() -> None:
 
 
 @pytest.mark.anyio
+async def test_try_acquire_cancelled_part_way_takes_nothing() -> None:
+    registry = LockRegistry()
+    # Hold the environment lock's internal condition so try_acquire suspends
+    # right after taking the component lock, then cancel it there.
+    environment = await registry._environment("qulacs")
+    async with environment._condition:
+        task = asyncio.create_task(
+            registry.try_acquire(
+                LockScope(components=("gateway",), environment="qulacs"),
+                operation="install",
+                held_by="u",
+            )
+        )
+        while not registry.snapshot():
+            await asyncio.sleep(0)
+        assert [info.scope for info in registry.snapshot()] == ["component:gateway"]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert registry.snapshot() == []
+    # Nothing lingers: the same scope can be taken right away.
+    held = await registry.try_acquire(
+        LockScope(components=("gateway",), environment="qulacs"),
+        operation="install",
+        held_by="u",
+    )
+    await held.release()
+
+
+@pytest.mark.anyio
 async def test_try_acquire_conflicts_with_itself() -> None:
     registry = LockRegistry()
     scope = LockScope(components=("engine",))

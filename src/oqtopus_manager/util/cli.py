@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # Seconds between SIGTERM and SIGKILL when a timed-out command is stopped.
 _KILL_GRACE_SEC = 5.0
 _EXIT_POLL_SEC = 0.1
+_QUEUE_POLL_SEC = 0.1
+# How long to keep reading output after the process has exited, waiting for EOF.
+_EOF_GRACE_SEC = 1.0
 
 
 @dataclass(frozen=True)
@@ -72,19 +75,29 @@ async def _drain_stdout_queue(
     process: asyncio.subprocess.Process,
     reader_task: asyncio.Task[None],
 ) -> AsyncGenerator[str]:
-    """Yield decoded output lines from *queue* until EOF or the process exits.
+    """Yield decoded output lines from *queue* until EOF, or shortly after exit.
+
+    The pipe normally reaches EOF right after the process exits. Reading
+    continues for up to ``_EOF_GRACE_SEC`` after the exit is noticed, so
+    output still in the pipe (or delayed by a busy event loop) isn't
+    dropped; a leftover process holding the pipe open only delays the end
+    of the stream by that much.
 
     Yields:
         One output line at a time, without its trailing newline.
 
     """
+    loop = asyncio.get_running_loop()
+    deadline: float | None = None
     while True:
+        if deadline is None and process.returncode is not None:
+            deadline = loop.time() + _EOF_GRACE_SEC
+        if deadline is not None and loop.time() >= deadline:
+            reader_task.cancel()
+            break
         try:
-            raw = await asyncio.wait_for(queue.get(), timeout=0.1)
+            raw = await asyncio.wait_for(queue.get(), timeout=_QUEUE_POLL_SEC)
         except TimeoutError:
-            if process.returncode is not None:
-                reader_task.cancel()
-                break
             continue
         if raw is None:
             break

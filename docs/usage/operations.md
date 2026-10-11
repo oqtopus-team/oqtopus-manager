@@ -61,6 +61,9 @@ came out in between, run install again after the first one finishes.
   for following what is happening *now*, not a complete log of past runs.
 - Everything is kept in the Manager process's memory only. **Restarting Manager clears the list**,
   just like it clears [locks](locks.md#limitations).
+- For the same reason, **Manager must run as a single process** (no multiple workers). With
+  several workers, a `GET .../operations/{operation_id}/stream` can reach a worker that didn't
+  start the operation and answer `404`, and locks no longer exclude each other across workers.
 
 ## API
 

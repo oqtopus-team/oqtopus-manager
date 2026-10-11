@@ -81,7 +81,11 @@ the `MAX_FINISHED_PER_ENVIRONMENT` (10) most recently finished per environment. 
 at roughly 10 × `operation_buffer_lines` lines per environment. Running operations are never
 dropped. Purging happens lazily on each `start`/`get`/`list_for` call; there is no background task.
 
-Everything lives in process memory. A restart loses every operation, the same as with locks.
+Everything lives in process memory. A restart loses every operation, the same as with locks, and
+both registries assume a **single Manager process**. With several workers, an operation's stream
+could be requested from a worker that never saw it, and locks wouldn't exclude across workers.
+`main.py` passes the app object to `uvicorn.run`, which can only run one worker, so keep it that
+way rather than switching to an import-string app with `workers=`.
 
 ## Force-unlock
 
