@@ -55,6 +55,54 @@ async def _run_quick(argv: list[str]) -> str:
         return "timeout"
 
 
+async def _run_manager_info() -> str | None:
+    """Run ``oqtopus manager info`` in the current working directory.
+
+    ``oqtopus manager start`` launches the manager with its environment root as
+    the CWD, so the CLI finds that environment's ``.metadata``. When the manager
+    runs outside such an environment (e.g. from a source checkout) the command
+    fails and the caller hides the section.
+
+    Returns:
+        The command stdout, or None if the command is missing, times out,
+        exits non-zero, or prints nothing.
+
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "oqtopus",
+            "manager",
+            "info",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+    except FileNotFoundError:
+        return None
+    except TimeoutError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return stdout.decode(errors="replace").strip() or None
+
+
+def _parse_info(info: str | None) -> list[tuple[str, str]]:
+    """Split ``key=value`` lines of ``oqtopus ... info`` output into pairs.
+
+    Lines without ``=`` are ignored; the CLI's key order is preserved.
+
+    Returns:
+        A list of ``(key, value)`` tuples, empty when ``info`` is None.
+
+    """
+    items = []
+    for line in (info or "").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key.strip():
+            items.append((key.strip(), value.strip()))
+    return items
+
+
 def _which_to_path(which: str, cfg: AppConfig) -> pathlib.Path:
     """Resolve 'config' or 'logging' to the corresponding settings file path.
 
@@ -122,6 +170,9 @@ async def settings_page(request: Request) -> HTMLResponse:
     oqtopus_path = shutil.which("oqtopus") or "not found"
     raw_version = await _run_quick(["oqtopus", "version"])
     oqtopus_version = raw_version.removeprefix("oqtopus ").strip()
+    manager_info = _parse_info(await _run_manager_info())
+    manager_root = dict(manager_info).get("environment_root", "").rstrip("/")
+    manager_metadata_path = f"{manager_root}/.metadata" if manager_root else None
     lock_ctx = _build_lock_context(cfg)
 
     return request.app.state.templates.TemplateResponse(
@@ -136,6 +187,8 @@ async def settings_page(request: Request) -> HTMLResponse:
             "environments_content": _read(environments_path),
             "oqtopus_path": oqtopus_path,
             "oqtopus_version": oqtopus_version,
+            "manager_info": manager_info,
+            "manager_metadata_path": manager_metadata_path,
             "can_update": request.app.state.permissions.has_permission(
                 user, "app_settings.update"
             ),

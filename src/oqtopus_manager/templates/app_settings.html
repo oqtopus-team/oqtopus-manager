@@ -51,6 +51,27 @@
     </dl>
   </details>
 
+  {# OQTOPUS Manager environment metadata | read-only; hidden when `oqtopus manager info` fails #}
+  {% if manager_info %}
+  <details data-sec="appsettings-manager" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden group" open>
+    <summary class="flex items-center gap-2 px-5 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors border-b border-transparent group-open:border-gray-200">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400 flex-shrink-0 transition-transform duration-200 group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <div class="flex-1 min-w-0">
+        <h2 class="text-sm font-semibold text-[#4887FA]">OQTOPUS Manager</h2>
+        {% if manager_metadata_path %}<p class="text-xs text-gray-400 font-mono mt-0.5 truncate">{{ manager_metadata_path }}</p>{% endif %}
+      </div>
+    </summary>
+    <dl class="divide-y divide-gray-200">
+      {% for key, value in manager_info %}
+      <div class="flex items-center px-5 py-2">
+        <dt class="w-36 text-sm font-medium text-gray-500 flex-shrink-0">{{ key }}</dt>
+        <dd class="text-sm font-mono text-gray-800">{{ value or '—' }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+  </details>
+  {% endif %}
+
   {# config.yaml | editable for admin, read-only for operator #}
   {% if can_update %}
   {{ editor_section('cfg', 'config.yaml', config_path, 'appsettings-config', 'code-config', 'language-yaml', config_content, "downloadCode('code-config', 'config.yaml')") }}
