@@ -52,8 +52,8 @@ def test_parse_status_all_running_process() -> None:
     assert data.template == "backend"
     assert data.environment_name == "e1"
     assert [s.model_dump() for s in data.services] == [
-        {"name": "core", "kind": "process", "state": "running", "pid": 111, "containers": None},
-        {"name": "gateway", "kind": "process", "state": "running", "pid": 222, "containers": None},
+        {"name": "core", "kind": "process", "state": "running", "pid": 111, "containers": None, "details": None},
+        {"name": "gateway", "kind": "process", "state": "running", "pid": 222, "containers": None, "details": None},
     ]
 
 
@@ -92,6 +92,59 @@ def test_parse_status_container_service_stopped() -> None:
     assert svc.kind == "container"
     assert svc.state == "stopped"
     assert svc.containers == []
+
+
+def test_parse_status_container_service_running_uses_service_names() -> None:
+    result = _ok("db: Running (db, seaweedfs)\n")
+    data = parse_status(result, template="cloud-local", environment_name="e1")
+    svc = data.services[0]
+    assert svc.state == "running"
+    assert svc.containers == ["db", "seaweedfs"]
+    assert svc.details is None
+
+
+def test_parse_status_container_service_partial() -> None:
+    result = _ok("db: Partially running (db: running, seaweedfs: stopped)\n")
+    data = parse_status(result, template="cloud-local", environment_name="e1")
+    svc = data.services[0]
+    assert svc.kind == "container"
+    assert svc.state == "partial"
+    assert svc.containers == ["db", "seaweedfs"]
+    assert svc.details is not None
+    assert [d.model_dump() for d in svc.details] == [
+        {"name": "db", "state": "running"},
+        {"name": "seaweedfs", "state": "stopped"},
+    ]
+
+
+def test_parse_status_container_service_partial_keeps_cli_values() -> None:
+    result = _ok("db: PARTIALLY RUNNING (db: running, minio: Exited, new_svc: x)\n")
+    data = parse_status(result, template="cloud-local", environment_name="e1")
+    svc = data.services[0]
+    assert svc.state == "partial"
+    assert svc.details is not None
+    assert [(d.name, d.state) for d in svc.details] == [
+        ("db", "running"),
+        ("minio", "Exited"),
+        ("new_svc", "x"),
+    ]
+
+
+def test_parse_status_container_service_partial_without_parentheses() -> None:
+    result = _ok("db: Partially running\n")
+    data = parse_status(result, template="cloud-local", environment_name="e1")
+    svc = data.services[0]
+    assert svc.state == "partial"
+    assert svc.containers == []
+    assert svc.details == []
+
+
+def test_parse_status_partial_state_not_treated_as_running() -> None:
+    # Regression: an unanchored "running (...)" search used to match inside
+    # "Partially running (...)" and report the service as running.
+    result = _ok("db: Partially running (db: running, seaweedfs: stopped)\n")
+    data = parse_status(result, template="cloud-local", environment_name="e1")
+    assert data.services[0].state != "running"
 
 
 def test_parse_status_mixed_process_and_container_in_one_output() -> None:

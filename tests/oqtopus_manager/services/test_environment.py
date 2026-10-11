@@ -101,6 +101,22 @@ async def test_has_running_services_is_case_insensitive(
 
 
 @pytest.mark.anyio
+async def test_has_running_services_true_when_partially_running(
+    tmp_path: pathlib.Path, mocker: MockerFixture
+) -> None:
+    mocker.patch(
+        "oqtopus_manager.services.environment.run_oqtopus_subcommand_output",
+        return_value=CommandResult(
+            returncode=0,
+            stdout="db: Partially running (db: running, seaweedfs: stopped)\n"
+            "worker: Stopped\n",
+            stderr="",
+        ),
+    )
+    assert await env_service.has_running_services("cloud-local", tmp_path, 10) is True
+
+
+@pytest.mark.anyio
 async def test_has_running_services_fails_closed_on_command_failure(
     tmp_path: pathlib.Path, mocker: MockerFixture
 ) -> None:

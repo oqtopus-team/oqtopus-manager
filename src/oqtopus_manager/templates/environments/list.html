@@ -93,8 +93,9 @@
     var services = outcome.data.services;
     if (!services.length) { el.innerHTML = ''; return; }
     var running = services.filter(function (s) { return s.state === 'running'; }).length;
+    var partial = services.some(function (s) { return s.state === 'partial'; });
     var cls = running === services.length ? 'text-green-600 font-medium'
-            : running > 0               ? 'text-yellow-600 font-medium'
+            : (running > 0 || partial)  ? 'text-yellow-600 font-medium'
             :                              'text-red-500 font-medium';
     el.innerHTML = '<span class="' + cls + '">' + running + '/' + services.length + ' running</span>';
   }

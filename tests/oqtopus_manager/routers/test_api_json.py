@@ -112,7 +112,7 @@ def test_get_status_returns_parsed_services(
     assert data["environment_name"] == "demo"
     assert data["services"][0] == {
         "name": "core", "kind": "process", "state": "running",
-        "pid": 42, "containers": None,
+        "pid": 42, "containers": None, "details": None,
     }
 
 

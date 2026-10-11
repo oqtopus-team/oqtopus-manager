@@ -67,14 +67,24 @@ def parse_service_status(result: CommandResult) -> list[ServiceStatus]:
 # ── Structured models ────────────────────────────────────────────────────────
 
 
+class ServiceDetail(BaseModel):
+    """One sub-service's state inside a partially running container service."""
+
+    name: str
+    state: str  # as reported by the CLI; not restricted to known values
+
+
 class ServiceStatusItem(BaseModel):
     """One service's status, e.g. one row of ``oqtopus backend status``."""
 
     name: str
     kind: str  # "process" | "container"; unknown values pass through
-    state: str  # "running" | "stopped"; unknown values pass through
+    # "running" | "stopped" | "partial"; unknown values pass through
+    state: str
     pid: int | None = None
     containers: list[str] | None = None
+    # Per-sub-service states; only set when ``state`` is "partial".
+    details: list[ServiceDetail] | None = None
 
 
 class StatusData(BaseModel):
@@ -133,15 +143,17 @@ class VersionsData(BaseModel):
 
 
 def _normalize_state(raw: str) -> str:
-    """Map a free-form CLI state string to "running"/"stopped", or pass through.
+    """Map a free-form CLI state string to a known state, or pass through.
 
     Returns:
-        "running" or "stopped" for recognized prefixes; otherwise the
+        "running", "stopped" or "partial" for recognized prefixes; otherwise the
         lowercased, stripped input, since an unrecognized state should pass
         through rather than raise.
 
     """
     low = raw.strip().lower()
+    if low.startswith(_PARTIAL_PREFIX):
+        return "partial"
     if low.startswith("running"):
         return "running"
     if low.startswith("stopped"):
@@ -172,8 +184,34 @@ def _component_kind(version: str | None) -> str | None:
 # services/locks.py to decide the exclusive-lock scope for a service.
 CONTAINER_SERVICE_NAMES = frozenset({"db"})
 
+_PARTIAL_PREFIX = "partially running"
+
 _PID_RE = re.compile(r"running\s*\(pid\s+(\d+)\)", re.IGNORECASE)
+# Used with ``.match`` (not ``.search``) so "Partially running (...)" is not
+# mistaken for "Running (...)".
 _CONTAINER_LIST_RE = re.compile(r"running\s*\(([^)]+)\)", re.IGNORECASE)
+_PARTIAL_LIST_RE = re.compile(r"^partially\s+running\s*\(([^)]*)\)", re.IGNORECASE)
+
+
+def _parse_partial_details(inner: str) -> list[ServiceDetail]:
+    """Parse ``db: running, seaweedfs: stopped`` into per-service details.
+
+    Names and states are kept exactly as the CLI reported them, so a service
+    added to the CLI later needs no change here.
+
+    Returns:
+        One ServiceDetail per comma-separated item.
+
+    """
+    details = []
+    for item in inner.split(","):
+        name, sep, state = item.partition(":")
+        if not name.strip():
+            continue
+        details.append(
+            ServiceDetail(name=name.strip(), state=state.strip() if sep else "unknown")
+        )
+    return details
 
 
 def parse_status(
@@ -210,7 +248,24 @@ def parse_status(
             continue
 
         if name in CONTAINER_SERVICE_NAMES:
-            container_match = _CONTAINER_LIST_RE.search(state_raw)
+            partial_match = _PARTIAL_LIST_RE.match(state_raw)
+            if partial_match or state_raw.lower().startswith(_PARTIAL_PREFIX):
+                details = (
+                    _parse_partial_details(partial_match.group(1))
+                    if partial_match
+                    else []
+                )
+                services.append(
+                    ServiceStatusItem(
+                        name=name,
+                        kind="container",
+                        state="partial",
+                        containers=[d.name for d in details],
+                        details=details,
+                    )
+                )
+                continue
+            container_match = _CONTAINER_LIST_RE.match(state_raw)
             containers = (
                 [c.strip() for c in container_match.group(1).split(",")]
                 if container_match

@@ -118,7 +118,9 @@ async def has_running_services(
     root_dir: pathlib.Path,
     timeout: float,  # ruff: ignore[async-function-with-timeout]
 ) -> bool:
-    """Return True if ``oqtopus <subcommand> status`` reports any running service.
+    """Return True if ``oqtopus <subcommand> status`` reports a live service.
+
+    "Live" means running or partially running.
 
     Fails closed: if the status check itself cannot be completed, the state
     is unknown, so this reports "running" rather than "no services running"
@@ -141,7 +143,11 @@ async def has_running_services(
             result.stderr.strip(),
         )
         return True
-    return any(service.running for service in parse_service_status(result))
+    # A partially running service still has live containers, so it blocks too.
+    return any(
+        service.running or service.state.lower().startswith("partially running")
+        for service in parse_service_status(result)
+    )
 
 
 def validate_new_environment(
