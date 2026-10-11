@@ -21,8 +21,11 @@ logger = logging.getLogger(__name__)
 _KILL_GRACE_SEC = 5.0
 _EXIT_POLL_SEC = 0.1
 _QUEUE_POLL_SEC = 0.1
-# How long to keep reading output after the process has exited, waiting for EOF.
-_EOF_GRACE_SEC = 1.0
+# After the process exits without its pipe reaching EOF (a leftover process
+# holds it open): stop reading once it has been quiet this long...
+_EOF_IDLE_SEC = 1.0
+# ...or this long after the exit at the latest, even if it keeps writing.
+_EOF_MAX_WAIT_SEC = 10.0
 
 
 @dataclass(frozen=True)
@@ -77,30 +80,41 @@ async def _drain_stdout_queue(
 ) -> AsyncGenerator[str]:
     """Yield decoded output lines from *queue* until EOF, or shortly after exit.
 
-    The pipe normally reaches EOF right after the process exits. Reading
-    continues for up to ``_EOF_GRACE_SEC`` after the exit is noticed, so
-    output still in the pipe (or delayed by a busy event loop) isn't
-    dropped; a leftover process holding the pipe open only delays the end
-    of the stream by that much.
+    The pipe normally reaches EOF right after the process exits, and then
+    every line is delivered. EOF only fails to come when a leftover process
+    still holds the pipe open; for that case, reading the pipe stops once no
+    output has arrived for ``_EOF_IDLE_SEC`` after the exit, or at the
+    latest ``_EOF_MAX_WAIT_SEC`` after it. Lines already read are delivered
+    either way, however slowly the consumer takes them.
 
     Yields:
         One output line at a time, without its trailing newline.
 
     """
     loop = asyncio.get_running_loop()
-    deadline: float | None = None
+    exited_at: float | None = None
     while True:
-        if deadline is None and process.returncode is not None:
-            deadline = loop.time() + _EOF_GRACE_SEC
-        if deadline is not None and loop.time() >= deadline:
-            reader_task.cancel()
+        if exited_at is None and process.returncode is not None:
+            exited_at = loop.time()
+        if exited_at is not None and loop.time() - exited_at >= _EOF_MAX_WAIT_SEC:
             break
+        timeout = _QUEUE_POLL_SEC if exited_at is None else _EOF_IDLE_SEC
         try:
-            raw = await asyncio.wait_for(queue.get(), timeout=_QUEUE_POLL_SEC)
+            raw = await asyncio.wait_for(queue.get(), timeout=timeout)
         except TimeoutError:
-            continue
-        if raw is None:
+            if exited_at is None:
+                continue
             break
+        if raw is None:
+            return
+        yield raw.decode(errors="replace").rstrip()
+
+    # No EOF: stop reading the pipe, but hand over what was already read.
+    reader_task.cancel()
+    while not queue.empty():
+        raw = queue.get_nowait()
+        if raw is None:
+            return
         yield raw.decode(errors="replace").rstrip()
 
 

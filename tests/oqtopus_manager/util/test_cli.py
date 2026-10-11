@@ -301,6 +301,46 @@ async def test_stream_command_keeps_all_output_written_right_before_exit(
 
 
 @pytest.mark.anyio
+async def test_stream_command_slow_consumer_still_gets_every_line(
+    tmp_path: pathlib.Path,
+) -> None:
+    # The CLI exits at once, but the consumer (e.g. a slow browser) takes
+    # well over a second to read everything. Lines already read from the
+    # pipe must not be dropped just because time has passed since the exit.
+    chunks: list[str] = []
+    async for chunk in _stream_command(["seq", "1", "2000"], tmp_path):
+        chunks.append(chunk)
+        await asyncio.sleep(0.001)
+    assert len(chunks) == 2001
+    assert chunks[-2] == "data: 2000\n\n"
+    assert chunks[-1] == "event: done\ndata: success\n\n"
+
+
+@pytest.mark.anyio
+async def test_stream_command_stops_reading_a_never_closing_pipe(
+    tmp_path: pathlib.Path, mocker: MockerFixture
+) -> None:
+    # A leftover child keeps writing to the pipe after the CLI exits, so EOF
+    # never comes and output never goes quiet: the hard limit ends the stream.
+    mocker.patch("oqtopus_manager.util.cli._EOF_MAX_WAIT_SEC", 0.5)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    chunks = await _collect(
+        _stream_command(
+            [
+                "sh",
+                "-c",
+                "(for i in $(seq 1 60); do echo tick; sleep 0.05; done) & echo start",
+            ],
+            tmp_path,
+        )
+    )
+    assert loop.time() - started < 3
+    assert chunks[0] == "data: start\n\n"
+    assert chunks[-1] == "event: done\ndata: success\n\n"
+
+
+@pytest.mark.anyio
 async def test_stream_command_reads_output_arriving_shortly_after_exit(
     tmp_path: pathlib.Path,
 ) -> None:
