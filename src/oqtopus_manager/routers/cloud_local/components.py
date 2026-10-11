@@ -1,4 +1,9 @@
-"""Dedicated install/uninstall/update/versions routes for cloud-local environments."""
+"""Dedicated install/uninstall/update/versions routes for cloud-local environments.
+
+install/update are two-phase (POST answers 202 with an operation ID; output
+is read from ``.../operations/{id}/stream``); uninstall and versions stream
+their output directly. See ``routers/backend/components.py``.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from oqtopus_auth.fastapi import require_permission
 from pydantic import BaseModel
 
+from oqtopus_manager.routers._operations import (
+    make_operations_router,
+    start_operation,
+)
 from oqtopus_manager.routers._problem import problem_response
 from oqtopus_manager.routers._utils import (
     _get_config,
@@ -25,6 +34,10 @@ api_router = APIRouter(prefix="/api/cloud-local", tags=["cloud-local-api"])
 logger = logging.getLogger(__name__)
 
 _SUBCOMMAND = "cloud-local"
+
+operations_api_router = make_operations_router(
+    "/api/cloud-local", _SUBCOMMAND, ["cloud-local-api"]
+)
 
 
 class _InstallBody(BaseModel):
@@ -91,38 +104,36 @@ async def stream_component_versions(
 @api_router.post(
     "/{name}/components/{component}/install",
     dependencies=[require_permission("environment.component.manage")],
+    status_code=202,
 )
 async def install_component(
     request: Request, name: str, component: str, body: _InstallBody
-) -> StreamingResponse:
-    """Run ``oqtopus cloud-local install <component>`` and stream output as SSE.
+) -> JSONResponse:
+    """Start ``oqtopus cloud-local install <component>`` as a two-phase operation.
 
     Returns:
-        StreamingResponse with Server-Sent Events-formatted output.
-
-    Raises:
-        HTTPException: If the environment is not found or the component is invalid.
+        202 with the operation ID (read its output from
+        ``GET .../operations/{operation_id}/stream``), or an RFC 9457
+        problem response.
 
     """
-    cfg = _get_config(request)
     try:
-        env = env_service.get_environment_or_404(name, cfg)
         args = cloud_local_service.build_component_args(
             "install", component, body.version
         )
     except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    cwd = env.resolved_root_path(cfg.default_environment_base_path)
-    operation = f"{' '.join(args)} (environment={name})"
+        return problem_response(exc)
     logger.info("Cloud-local install: args=%s env=%s", args, name)
-    lock = cloud_local_service.install_lock_for(
-        _get_lock_registry(request),
-        name,
-        component,
-        operation=operation,
-        held_by=_get_held_by(request),
+    return await start_operation(
+        request,
+        template=_SUBCOMMAND,
+        name=name,
+        kind="install",
+        component=component,
+        version=None if component == "all" else body.version or "latest",
+        args=args,
+        lock_scope=cloud_local_service.install_lock_scope(name, component),
     )
-    return _sse_response(_SUBCOMMAND, args, cwd, cfg, lock)
 
 
 @api_router.post(
@@ -166,33 +177,27 @@ async def uninstall_component(
 @api_router.post(
     "/{name}/components/{component}/update",
     dependencies=[require_permission("environment.component.manage")],
+    status_code=202,
 )
-async def update_component(
-    request: Request, name: str, component: str
-) -> StreamingResponse:
-    """Run ``oqtopus cloud-local update <component>`` and stream output as SSE.
+async def update_component(request: Request, name: str, component: str) -> JSONResponse:
+    """Start ``oqtopus cloud-local update <component>`` as a two-phase operation.
 
     Returns:
-        StreamingResponse with Server-Sent Events-formatted output.
-
-    Raises:
-        HTTPException: If the environment is not found or the component is invalid.
+        202 with the operation ID, or an RFC 9457 problem response.
 
     """
-    cfg = _get_config(request)
     try:
-        env = env_service.get_environment_or_404(name, cfg)
         args = cloud_local_service.build_component_args("update", component, "")
     except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    cwd = env.resolved_root_path(cfg.default_environment_base_path)
-    operation = f"{' '.join(args)} (environment={name})"
+        return problem_response(exc)
     logger.info("Cloud-local update: args=%s env=%s", args, name)
-    lock = cloud_local_service.component_lock_for(
-        _get_lock_registry(request),
-        name,
-        component,
-        operation=operation,
-        held_by=_get_held_by(request),
+    return await start_operation(
+        request,
+        template=_SUBCOMMAND,
+        name=name,
+        kind="update",
+        component=component,
+        version=None,
+        args=args,
+        lock_scope=cloud_local_service.update_lock_scope(name, component),
     )
-    return _sse_response(_SUBCOMMAND, args, cwd, cfg, lock)

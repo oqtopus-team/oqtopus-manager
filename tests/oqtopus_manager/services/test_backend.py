@@ -33,7 +33,7 @@ from oqtopus_manager.services.exceptions import (
     CommandFailedError,
     InvalidArgumentError,
 )
-from oqtopus_manager.services.locks import LockRegistry
+from oqtopus_manager.services.locks import LockRegistry, LockScope
 from oqtopus_manager.util.cli import CommandResult
 
 # ── read_metadata is exercised via services.environment.read_metadata; see
@@ -508,29 +508,42 @@ class TestServiceLockFor:
             assert info.scope == "qulacs/*"
 
 
-class TestInstallLockFor:
+async def _scopes_taken(scope: LockScope) -> set[str]:
+    registry = LockRegistry()
+    held = await registry.try_acquire(scope, operation="op", held_by="u")
+    scopes = {info.scope for info in registry.snapshot()}
+    await held.release()
+    return scopes
+
+
+class TestInstallLockScope:
     @pytest.mark.anyio
     async def test_specific_component_locks_component_and_env(self) -> None:
-        registry = LockRegistry()
-        async with backend_service.install_lock_for(
-            registry, "qulacs", "gateway", operation="op", held_by="u"
-        ):
-            scopes = {info.scope for info in registry.snapshot()}
-            assert scopes == {"component:gateway", "environment:qulacs"}
+        scope = backend_service.install_lock_scope("qulacs", "gateway")
+        assert await _scopes_taken(scope) == {
+            "component:gateway",
+            "environment:qulacs",
+        }
 
     @pytest.mark.anyio
     async def test_all_locks_every_component_and_env(self) -> None:
-        registry = LockRegistry()
-        async with backend_service.install_lock_for(
-            registry, "qulacs", "all", operation="op", held_by="u"
-        ):
-            scopes = {info.scope for info in registry.snapshot()}
-            assert scopes == {
-                "component:engine",
-                "component:tranqu",
-                "component:gateway",
-                "environment:qulacs",
-            }
+        scope = backend_service.install_lock_scope("qulacs", "all")
+        assert await _scopes_taken(scope) == {
+            "component:engine",
+            "component:tranqu",
+            "component:gateway",
+            "environment:qulacs",
+        }
+
+
+class TestUpdateLockScope:
+    @pytest.mark.anyio
+    async def test_locks_component_and_env(self) -> None:
+        scope = backend_service.update_lock_scope("qulacs", "tranqu")
+        assert await _scopes_taken(scope) == {
+            "component:tranqu",
+            "environment:qulacs",
+        }
 
 
 class TestComponentLockFor:
@@ -544,12 +557,8 @@ class TestComponentLockFor:
             assert scopes == {"component:engine", "environment:qulacs"}
 
 
-class TestBuildSseRuntimeLock:
+class TestBuildSseRuntimeLockScope:
     @pytest.mark.anyio
     async def test_locks_engine_component_only(self) -> None:
-        registry = LockRegistry()
-        async with backend_service.build_sse_runtime_lock(
-            registry, operation="op", held_by="u"
-        ):
-            [info] = registry.snapshot()
-            assert info.scope == "component:engine"
+        scope = backend_service.build_sse_runtime_lock_scope()
+        assert await _scopes_taken(scope) == {"component:engine"}

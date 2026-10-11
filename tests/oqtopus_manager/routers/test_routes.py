@@ -25,6 +25,7 @@ def config_path(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {
@@ -230,6 +231,7 @@ def cloud_local_config_path(
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {
@@ -447,6 +449,7 @@ def test_create_app_with_empty_templates_raises(
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {
@@ -494,6 +497,7 @@ def test_create_app_with_unsupported_template_raises(
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {
@@ -557,6 +561,7 @@ def test_app_icon_200_when_configured(
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {
@@ -670,6 +675,7 @@ def debug_client(
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
         },
         "appearance": {

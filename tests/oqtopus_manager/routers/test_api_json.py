@@ -40,6 +40,7 @@ def _config(templates: list[str]) -> dict:
         "behavior": {
             "log_tail_lines": 100,
             "log_buffer_lines": 1000,
+            "operation_buffer_lines": 1000,
             "file_edit_lock_timeout_sec": 600,
             "oqtopus_cli_read_timeout_sec": 10,
             "oqtopus_cli_operation_timeout_sec": 600,

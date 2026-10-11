@@ -7,7 +7,8 @@ import contextlib
 
 import pytest
 
-from oqtopus_manager.services.locks import LockRegistry, no_lock
+from oqtopus_manager.services.exceptions import LockBusyError
+from oqtopus_manager.services.locks import LockRegistry, LockScope, no_lock
 
 
 async def _hold(cm, active: list[int], max_active: list[int], hold_sec: float) -> None:
@@ -155,25 +156,6 @@ async def test_component_and_environment_lock_releases_both_on_exit() -> None:
 
 
 @pytest.mark.anyio
-async def test_all_components_and_environment_lock_two_concurrent_calls_complete() -> None:
-    """Two concurrent "install all" calls must not deadlock: both acquire every
-    component lock in the same (sorted) order, so one always fully precedes
-    the other rather than each holding a lock the other needs.
-    """
-    registry = LockRegistry()
-    components = ["gateway", "engine", "tranqu"]
-
-    async def worker() -> None:
-        async with registry.all_components_and_environment_lock(
-            components, "qulacs", operation="install all", held_by="u"
-        ):
-            await asyncio.sleep(0.02)
-
-    await asyncio.wait_for(asyncio.gather(worker(), worker()), timeout=2)
-    assert registry.snapshot() == []
-
-
-@pytest.mark.anyio
 async def test_all_services_and_environment_lock_releases_both_on_exit() -> None:
     registry = LockRegistry()
     async with registry.all_services_and_environment_lock("qulacs", operation="delete", held_by="u"):
@@ -266,6 +248,160 @@ async def test_force_unlock_unknown_scope_format_returns_false() -> None:
     registry = LockRegistry()
     assert await registry.force_unlock("garbage") is False
     assert await registry.force_unlock("unknown-env/core") is False
+
+
+# ── try_acquire (non-blocking) ───────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_try_acquire_takes_every_lock_in_scope() -> None:
+    registry = LockRegistry()
+    held = await registry.try_acquire(
+        LockScope(components=("gateway", "engine"), environment="qulacs"),
+        operation="install",
+        held_by="u",
+    )
+    assert {info.scope for info in registry.snapshot()} == {
+        "component:engine",
+        "component:gateway",
+        "environment:qulacs",
+    }
+    await held.release()
+    assert registry.snapshot() == []
+
+
+@pytest.mark.anyio
+async def test_try_acquire_fails_fast_and_takes_nothing_when_busy() -> None:
+    registry = LockRegistry()
+    async with registry.environment_lock("qulacs", operation="other", held_by="bob"):
+        with pytest.raises(LockBusyError) as excinfo:
+            await asyncio.wait_for(
+                registry.try_acquire(
+                    LockScope(components=("gateway",), environment="qulacs"),
+                    operation="install",
+                    held_by="u",
+                ),
+                timeout=1,
+            )
+        # The component lock taken before hitting the busy one was given back.
+        assert [info.scope for info in registry.snapshot()] == ["environment:qulacs"]
+    assert excinfo.value.scope == "environment:qulacs"
+    assert excinfo.value.holder is not None
+    assert excinfo.value.holder.operation == "other"
+    assert excinfo.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_try_acquire_cancelled_part_way_takes_nothing() -> None:
+    registry = LockRegistry()
+    # Hold the environment lock's internal condition so try_acquire suspends
+    # right after taking the component lock, then cancel it there.
+    environment = await registry._environment("qulacs")
+    async with environment._condition:
+        task = asyncio.create_task(
+            registry.try_acquire(
+                LockScope(components=("gateway",), environment="qulacs"),
+                operation="install",
+                held_by="u",
+            )
+        )
+        while not registry.snapshot():
+            await asyncio.sleep(0)
+        assert [info.scope for info in registry.snapshot()] == ["component:gateway"]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert registry.snapshot() == []
+    # Nothing lingers: the same scope can be taken right away.
+    held = await registry.try_acquire(
+        LockScope(components=("gateway",), environment="qulacs"),
+        operation="install",
+        held_by="u",
+    )
+    await held.release()
+
+
+@pytest.mark.anyio
+async def test_try_acquire_conflicts_with_itself() -> None:
+    registry = LockRegistry()
+    scope = LockScope(components=("engine",))
+    held = await registry.try_acquire(scope, operation="build", held_by="u")
+    with pytest.raises(LockBusyError):
+        await registry.try_acquire(scope, operation="build", held_by="u")
+    await held.release()
+    await (await registry.try_acquire(scope, operation="build", held_by="u")).release()
+
+
+@pytest.mark.anyio
+async def test_waiting_lock_late_release_keeps_new_holder() -> None:
+    registry = LockRegistry()
+    async with registry.component_lock("engine", operation="first", held_by="u"):
+        assert await registry.force_unlock("component:engine") is True
+        second = await registry.try_acquire(
+            LockScope(components=("engine",)), operation="second", held_by="u"
+        )
+    # "first" has now released: "second" must still hold the lock.
+    [info] = registry.snapshot()
+    assert info.operation == "second"
+    await second.release()
+
+
+@pytest.mark.anyio
+async def test_service_scope_late_release_keeps_new_holder() -> None:
+    registry = LockRegistry()
+    second_holding = asyncio.Event()
+    first_done = asyncio.Event()
+
+    async def second() -> None:
+        async with registry.service_lock("qulacs", "core", operation="second", held_by="u"):
+            second_holding.set()
+            await first_done.wait()
+            [info] = registry.snapshot()
+            assert info.operation == "second"
+
+    async with registry.service_lock("qulacs", "core", operation="first", held_by="u"):
+        assert await registry.force_unlock("qulacs/core") is True
+        task = asyncio.create_task(second())
+        await second_holding.wait()
+    first_done.set()
+    await task
+    assert registry.snapshot() == []
+
+
+@pytest.mark.anyio
+async def test_service_all_late_release_keeps_new_holder() -> None:
+    registry = LockRegistry()
+    second_holding = asyncio.Event()
+    first_done = asyncio.Event()
+
+    async def second() -> None:
+        async with registry.service_lock_all("qulacs", operation="second", held_by="u"):
+            second_holding.set()
+            await first_done.wait()
+            [info] = registry.snapshot()
+            assert info.operation == "second"
+
+    async with registry.service_lock_all("qulacs", operation="first", held_by="u"):
+        assert await registry.force_unlock("qulacs/*") is True
+        task = asyncio.create_task(second())
+        await second_holding.wait()
+    first_done.set()
+    await task
+    assert registry.snapshot() == []
+
+
+@pytest.mark.anyio
+async def test_late_release_after_force_unlock_keeps_new_holder() -> None:
+    registry = LockRegistry()
+    scope = LockScope(components=("engine",))
+    first = await registry.try_acquire(scope, operation="first", held_by="u")
+    assert await registry.force_unlock("component:engine") is True
+    second = await registry.try_acquire(scope, operation="second", held_by="u")
+    await first.release()
+    [info] = registry.snapshot()
+    assert info.operation == "second"
+    await second.release()
+    assert registry.snapshot() == []
 
 
 # ── no_lock ───────────────────────────────────────────────────────────────────

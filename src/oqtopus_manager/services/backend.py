@@ -16,6 +16,7 @@ from oqtopus_manager.services.exceptions import (
     InvalidArgumentError,
     TopologyNotConfiguredError,
 )
+from oqtopus_manager.services.locks import LockScope
 from oqtopus_manager.util.cli import run_oqtopus_subcommand_output
 from oqtopus_manager.util.parse import (
     CONTAINER_SERVICE_NAMES,
@@ -224,23 +225,26 @@ def service_lock_for(
     return registry.service_lock(name, scope, operation=operation, held_by=held_by)
 
 
-def install_lock_for(
-    registry: LockRegistry, name: str, component: str, *, operation: str, held_by: str
-) -> AbstractAsyncContextManager[None]:
-    """Return the lock for an install operation.
+def install_lock_scope(name: str, component: str) -> LockScope:
+    """Return the locks an install needs.
 
     Returns:
-        The (component, environment) lock, or every component's lock plus
-        the environment lock when component == "all".
+        The component plus the environment, or every component plus the
+        environment when component == "all".
 
     """
-    if component == "all":
-        return registry.all_components_and_environment_lock(
-            list(_VALID_COMPONENTS), name, operation=operation, held_by=held_by
-        )
-    return registry.component_and_environment_lock(
-        component, name, operation=operation, held_by=held_by
-    )
+    components = tuple(_VALID_COMPONENTS) if component == "all" else (component,)
+    return LockScope(components=components, environment=name)
+
+
+def update_lock_scope(name: str, component: str) -> LockScope:
+    """Return the locks an update needs.
+
+    Returns:
+        The component plus the environment.
+
+    """
+    return LockScope(components=(component,), environment=name)
 
 
 def component_lock_for(
@@ -257,16 +261,15 @@ def component_lock_for(
     )
 
 
-def build_sse_runtime_lock(
-    registry: LockRegistry, *, operation: str, held_by: str
-) -> AbstractAsyncContextManager[None]:
-    """Return the lock for ``build sse-runtime`` (guards the "engine" component).
+def build_sse_runtime_lock_scope() -> LockScope:
+    """Return the locks ``build sse-runtime`` needs.
 
     Returns:
-        The "engine" component lock.
+        The "engine" component only: the Docker image is host-wide, not
+        tied to the environment that triggered the build.
 
     """
-    return registry.component_lock("engine", operation=operation, held_by=held_by)
+    return LockScope(components=("engine",))
 
 
 async def _run(

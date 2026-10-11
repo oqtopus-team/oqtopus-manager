@@ -12,6 +12,11 @@ than the default ``{"detail": ...}`` shape).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from oqtopus_manager.services.locks import LockInfo
+
 
 class ServiceError(Exception):
     """Base class for errors raised by the services layer."""
@@ -127,6 +132,34 @@ class LockConflictError(ServiceError):
         self.locked_since = locked_since
         self.locked_since_ts = locked_since_ts
         super().__init__("File is already locked.")
+
+
+class LockBusyError(ServiceError):
+    """An operation lock is held by another operation, and the caller won't wait."""
+
+    status_code = 409
+
+    def __init__(self, scope: str, holder: LockInfo | None) -> None:
+        self.scope = scope
+        self.holder = holder
+        if holder is None:
+            message = f"'{scope}' is held by another operation."
+        else:
+            message = (
+                f"'{scope}' is held by '{holder.operation}' "
+                f"(started by {holder.held_by} at {holder.held_since} UTC)."
+            )
+        super().__init__(message)
+
+
+class OperationNotFoundError(ServiceError):
+    """No operation with the given ID exists (never did, or already expired)."""
+
+    status_code = 404
+
+    def __init__(self, operation_id: str) -> None:
+        self.operation_id = operation_id
+        super().__init__(f"Operation '{operation_id}' not found (it may have expired).")
 
 
 class LockNotHeldError(ServiceError):

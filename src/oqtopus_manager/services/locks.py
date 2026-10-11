@@ -17,6 +17,8 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from oqtopus_manager.services.exceptions import LockBusyError
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
@@ -51,7 +53,7 @@ class _NamedLock:
     """
 
     def __init__(self, scope: str) -> None:
-        self._scope = scope
+        self.scope = scope
         self._condition = asyncio.Condition()
         self.info: LockInfo | None = None
 
@@ -59,16 +61,44 @@ class _NamedLock:
     async def acquire(self, *, operation: str, held_by: str) -> AsyncGenerator[None]:
         async with self._condition:
             await self._condition.wait_for(lambda: self.info is None)
-            self.info = LockInfo(
-                scope=self._scope,
+            info = LockInfo(
+                scope=self.scope,
                 operation=operation,
                 held_by=held_by,
                 acquired_at=time.time(),
             )
+            self.info = info
         try:
             yield
         finally:
-            async with self._condition:
+            await self.release(info)
+
+    async def try_acquire(self, *, operation: str, held_by: str) -> LockInfo | None:
+        """Take this lock if it is free right now, without waiting.
+
+        Returns:
+            The new holder's LockInfo, or None if someone already holds it.
+
+        """
+        async with self._condition:
+            if self.info is not None:
+                return None
+            self.info = LockInfo(
+                scope=self.scope,
+                operation=operation,
+                held_by=held_by,
+                acquired_at=time.time(),
+            )
+            return self.info
+
+    async def release(self, info: LockInfo) -> None:
+        """Release the hold *info* describes, if it is still the current one.
+
+        After a force-unlock, someone else may already hold the lock again;
+        the original holder's late release must not clear their hold.
+        """
+        async with self._condition:
+            if self.info is info:
                 self.info = None
                 self._condition.notify_all()
 
@@ -85,6 +115,28 @@ class _NamedLock:
             self.info = None
             self._condition.notify_all()
             return True
+
+
+@dataclass(frozen=True)
+class LockScope:
+    """The locks one operation needs, for ``LockRegistry.try_acquire``."""
+
+    components: tuple[str, ...]
+    environment: str | None = None
+
+
+class HeldLocks:
+    """Locks taken together by ``LockRegistry.try_acquire``."""
+
+    def __init__(self, held: list[tuple[_NamedLock, LockInfo]]) -> None:
+        self._held = held
+        self.infos = tuple(info for _, info in held)
+
+    async def release(self) -> None:
+        """Release every lock still held, in reverse order. Safe to call twice."""
+        held, self._held = self._held, []
+        for lock, info in reversed(held):
+            await lock.release(info)
 
 
 class _EnvironmentServiceScope:
@@ -112,18 +164,21 @@ class _EnvironmentServiceScope:
             await self._condition.wait_for(
                 lambda: self._all_info is None and scope not in self._active
             )
-            self._active[scope] = LockInfo(
+            info = LockInfo(
                 scope=f"{self._environment}/{scope}",
                 operation=operation,
                 held_by=held_by,
                 acquired_at=time.time(),
             )
+            self._active[scope] = info
         try:
             yield
         finally:
+            # Only our own hold: after a force-unlock, someone else may hold it now.
             async with self._condition:
-                self._active.pop(scope, None)
-                self._condition.notify_all()
+                if self._active.get(scope) is info:
+                    del self._active[scope]
+                    self._condition.notify_all()
 
     @asynccontextmanager
     async def acquire_all(
@@ -133,18 +188,20 @@ class _EnvironmentServiceScope:
             await self._condition.wait_for(
                 lambda: self._all_info is None and not self._active
             )
-            self._all_info = LockInfo(
+            info = LockInfo(
                 scope=f"{self._environment}/*",
                 operation=operation,
                 held_by=held_by,
                 acquired_at=time.time(),
             )
+            self._all_info = info
         try:
             yield
         finally:
             async with self._condition:
-                self._all_info = None
-                self._condition.notify_all()
+                if self._all_info is info:
+                    self._all_info = None
+                    self._condition.notify_all()
 
     def snapshot(self) -> list[LockInfo]:
         """Return every lock currently held in this environment's service scope.
@@ -260,21 +317,6 @@ class LockRegistry:
             yield
 
     @asynccontextmanager
-    async def all_components_and_environment_lock(
-        self, components: list[str], environment: str, *, operation: str, held_by: str
-    ) -> AsyncGenerator[None]:
-        """Guard "install all": every component lock (fixed order), then environment."""
-        async with contextlib.AsyncExitStack() as stack:
-            for component in sorted(components):
-                await stack.enter_async_context(
-                    self.component_lock(component, operation=operation, held_by=held_by)
-                )
-            await stack.enter_async_context(
-                self.environment_lock(environment, operation=operation, held_by=held_by)
-            )
-            yield
-
-    @asynccontextmanager
     async def all_services_and_environment_lock(
         self, environment: str, *, operation: str, held_by: str
     ) -> AsyncGenerator[None]:
@@ -284,6 +326,48 @@ class LockRegistry:
             self.environment_lock(environment, operation=operation, held_by=held_by),
         ):
             yield
+
+    # ── non-blocking acquisition ────────────────────────────────────────
+
+    async def try_acquire(
+        self, scope: LockScope, *, operation: str, held_by: str
+    ) -> HeldLocks:
+        """Take every lock in *scope* right now, or none of them.
+
+        Uses the same fixed order as the combined methods above (components
+        sorted, then the environment). Never waits, so it cannot deadlock
+        against them. On the first lock found busy -- or if the caller is
+        cancelled part-way -- it releases whatever it already took.
+
+        Returns:
+            The held locks, to be released by the caller via ``release()``.
+
+        Raises:
+            LockBusyError: If any lock in *scope* is already held.
+
+        """
+        locks = [await self._component(c) for c in sorted(scope.components)]
+        if scope.environment is not None:
+            locks.append(await self._environment(scope.environment))
+        held: list[tuple[_NamedLock, LockInfo]] = []
+        busy: _NamedLock | None = None
+        try:
+            for lock in locks:
+                info = await lock.try_acquire(operation=operation, held_by=held_by)
+                if info is None:
+                    busy = lock
+                    break
+                held.append((lock, info))
+        except BaseException:
+            # Cancelled part-way (e.g. the request was abandoned): give back
+            # whatever was taken, so no partial scope lingers.
+            await HeldLocks(held).release()
+            raise
+        if busy is not None:
+            holder = busy.info
+            await HeldLocks(held).release()
+            raise LockBusyError(busy.scope, holder)
+        return HeldLocks(held)
 
     # ── introspection / force-unlock ─────────────────────────────────────
 

@@ -83,6 +83,9 @@ lint.ignore = [
   "D213",
   "ISC001",
 ]
+# FastAPI resolves route return annotations at runtime (to build /openapi.json),
+# so response classes must stay real imports, never TYPE_CHECKING-only ones.
+lint.flake8-type-checking.exempt-modules = ["typing", "fastapi.responses"]
 
 [tool.mypy]
 files = ["src", "tests"]

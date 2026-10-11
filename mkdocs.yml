@@ -10,6 +10,7 @@ nav:
       - Cloud Local Environments: usage/cloud_local.md
       - Backend Environments: usage/backend.md
       - Exclusive Locks: usage/locks.md
+      - Long-running Operations: usage/operations.md
       - Configuration: usage/configuration.md
       - Authentication: usage/authentication.md
       - Permissions: usage/permissions.md
@@ -22,6 +23,7 @@ nav:
       - Access Control: developer_guidelines/access_control.md
       - Permissions API: developer_guidelines/permissions.md
       - Exclusive Locks: developer_guidelines/locks.md
+      - Long-running Operations: developer_guidelines/operations.md
       - How to Contribute: CONTRIBUTING.md
       - Code of Conduct: "https://github.com/oqtopus-team/.github/blob/main/CODE_OF_CONDUCT.md"
       - Security: "https://github.com/oqtopus-team/.github/blob/main/SECURITY.md"

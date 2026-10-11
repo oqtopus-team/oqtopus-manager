@@ -1,7 +1,8 @@
 """RFC 9457 (application/problem+json) error responses for the /api routes.
 
-Only the new JSON read endpoints (status/device-status/info/versions/list)
-use this shape; existing HTML/HTMX routes keep their current
+Used by the JSON read endpoints (status/device-status/info/versions/list)
+and the two-phase operation endpoints (install/update/build-sse-runtime and
+``.../operations``); the remaining routes keep their
 ``HTTPException(detail=...)`` contract unchanged.
 """
 
@@ -24,6 +25,8 @@ _TITLES: dict[str, str] = {
     "ReservedEnvironmentNameError": "Environment name is reserved",
     "EnvironmentAlreadyExistsError": "Environment already exists",
     "InvalidArgumentError": "Invalid argument",
+    "LockBusyError": "Resource is locked by another operation",
+    "OperationNotFoundError": "Operation not found",
 }
 
 

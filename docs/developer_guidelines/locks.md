@@ -27,12 +27,14 @@ order — component, then environment** — or two operations acquiring the same
 pair in opposite order can deadlock. `LockRegistry` encodes this as combined
 methods rather than leaving callers to get the order right themselves:
 
-- `component_and_env_lock(component, env, ...)` — install/uninstall/update
-- `all_components_and_env_lock(components, env, ...)` — install all (every
-  component lock, sorted, then env — the sort keeps two concurrent "install
-  all" calls from deadlocking on each other)
-- `env_all_and_env_lock(env, ...)` — delete (the whole service hierarchy,
-  then the env lock itself)
+- `component_and_environment_lock(component, env, ...)` — uninstall
+- `all_services_and_environment_lock(env, ...)` — delete (the whole service
+  hierarchy, then the env lock itself)
+- `try_acquire(LockScope(...), ...)` — install (including install all),
+  update and build-sse-runtime, which must not wait (see
+  [Non-blocking acquisition](#non-blocking-acquisition)). It takes the
+  components sorted, then the environment, so two concurrent "install all"
+  calls can't deadlock either.
 
 **When adding a new operation that needs more than one lock, check whether it
 fits one of these first. If not, add a new combined method following the same
@@ -48,9 +50,12 @@ primitive's internal state. If these were built on `asyncio.Lock` instead, an
 external `force_unlock` would have to call `.release()` on a lock it didn't
 acquire, and when the original holder's own `finally` later called `.release()`
 too, that second call would raise (`asyncio.Lock` isn't a counting semaphore).
-The `finally` blocks that release these locks are written to be idempotent
-(`self.info = None`, `self._active.pop(scope, None)`) specifically so a
-concurrent `force_unlock` can never cause that crash.
+The `finally` blocks that release these locks never raise, so a concurrent
+`force_unlock` can never cause that crash. They also only clear the hold
+**they** created (compared by identity with the `LockInfo` they stored). After
+a force-unlock, another operation may already hold the lock again. Clearing
+it unconditionally would silently drop that new hold, and a third operation
+could then run concurrently with it.
 
 ## Wiring a lock into a streaming CLI call
 
@@ -83,6 +88,24 @@ is still reading the SSE stream. This task is only created when `timeout` or
 `lock` is passed, so callers that pass neither see no behavior change and no
 extra task.
 
+On timeout, the supervisor stops the CLI's whole **process group**, not just
+the CLI: `run_command` starts every command with `start_new_session=True`,
+and `_kill_process_group` sends `SIGTERM` to the group, waits up to
+`_KILL_GRACE_SEC`, then sends `SIGKILL`. Killing only the CLI would leave its
+children (a `docker build`, say) running and still writing to the shared
+resource after the lock is released, which is exactly what the lock exists
+to prevent.
+
+"Finished" means the CLI process **itself exited**. Every wait in
+`util/cli.py` uses `_wait_exited`, which polls `returncode`, never
+`process.wait()`: if `process.wait()` is called before the process exits, it
+also waits for every pipe to close. A process the CLI deliberately leaves
+behind, such as a started service still holding stdout, would then keep the
+operation "running" and its lock held indefinitely, or make a successful run
+look like a timeout and get killed. Something the CLI leaves behind that still
+writes to a shared resource after it exits is a CLI bug, and Manager does not
+try to detect it.
+
 If you add a new call site that needs locking, pass `lock=`/`timeout=` through
 rather than wrapping the call in your own `async with` — the generator-level
 `try/finally` in your router runs on disconnect too, and would release the
@@ -111,6 +134,21 @@ them.
 
 `_get_lock_registry` and `_get_held_by` live in `routers/_utils.py`, alongside
 `_get_config`/`_get_templates`.
+
+## Non-blocking acquisition
+
+The context-manager methods above **wait** for a busy lock. Two-phase operations
+(install/update/build — see [Long-running Operations](operations.md)) must not wait: their `POST`
+has to answer `202` or `409` right away. They use
+`registry.try_acquire(LockScope(components=..., environment=...), ...)` instead. It takes every
+lock in the scope, in the same fixed order (sorted components, then environment), or raises
+`LockBusyError` naming the first busy lock after giving back any it already took. Since it never
+waits, it can't deadlock with the waiting methods.
+
+It returns a `HeldLocks`, whose `release()` is idempotent and identity-checked: after a
+force-unlock lets someone else take the lock, the original holder's late `release()` leaves the
+new holder alone. Each service module defines which locks an operation needs as a `LockScope`
+(`install_lock_scope`, `update_lock_scope`, `build_sse_runtime_lock_scope`).
 
 ## Introspection and force-unlock
 

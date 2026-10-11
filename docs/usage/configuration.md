@@ -59,6 +59,7 @@ Tuning knobs for buffer sizes, timeouts, and feature behaviour.
 behavior:
   log_tail_lines: 100
   log_buffer_lines: 1000
+  operation_buffer_lines: 1000
   file_edit_lock_timeout_sec: 600
   oqtopus_cli_read_timeout_sec: 10
   oqtopus_cli_operation_timeout_sec: 600
@@ -68,9 +69,10 @@ behavior:
 |-----|------|----------|---------|-------------|
 | `log_tail_lines` | integer | **Yes** | — | Number of lines fetched from the end of a log file when the log page first loads. |
 | `log_buffer_lines` | integer | **Yes** | — | Maximum number of lines kept in the browser-side log buffer during live streaming. Older lines are discarded as new ones arrive. |
+| `operation_buffer_lines` | integer | **Yes** | — | Number of output lines the server keeps per install/update/build operation, replayed to anyone who (re)connects to it (see [Long-running Operations](operations.md)). Older lines are discarded once the limit is reached. Unrelated to `log_buffer_lines`, which only limits what the browser's log viewer keeps on screen. |
 | `file_edit_lock_timeout_sec` | integer | **Yes** | — | Seconds before an idle edit lock expires and is released automatically. Prevents files from remaining locked when a browser tab is closed mid-edit. |
 | `oqtopus_cli_read_timeout_sec` | integer | No | `10` | Seconds before a non-streamed, read-only `oqtopus` CLI invocation (status, device status, info, versions) is killed and reported as timed out. |
-| `oqtopus_cli_operation_timeout_sec` | integer | No | `600` | Seconds before a streamed operation (install, uninstall, update, build, start/stop/restart, init) is killed and reported as timed out. Also releases that operation's exclusive lock (see [Exclusive Locks](locks.md)). |
+| `oqtopus_cli_operation_timeout_sec` | integer | No | `600` | Seconds before an operation (install, uninstall, update, build, start/stop/restart, init) is stopped — together with every process it started, such as a `docker build` — and reported as timed out. Also releases that operation's exclusive lock (see [Exclusive Locks](locks.md#timeouts)). Raise it if a legitimate install or build can take longer. |
 
 ---
 

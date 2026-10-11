@@ -8,10 +8,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from oqtopus_auth.fastapi import require_permission
 
+from oqtopus_manager.routers._operations import force_unlock_response, locks_response
 from oqtopus_manager.routers._problem import problem_response
 from oqtopus_manager.routers._utils import (
     _get_config,
-    _get_lock_registry,
     _get_templates,
 )
 from oqtopus_manager.services import cloud_local as cloud_local_service
@@ -117,19 +117,11 @@ async def get_locks(request: Request, name: str) -> JSONResponse:  # ruff: ignor
     stuck operation needs to see that too.
 
     Returns:
-        JSONResponse with a list of {scope, operation, held_by, held_since}.
+        JSONResponse with a list of
+        {scope, operation, held_by, held_since, operation_id}.
 
     """
-    registry = _get_lock_registry(request)
-    return JSONResponse([
-        {
-            "scope": info.scope,
-            "operation": info.operation,
-            "held_by": info.held_by,
-            "held_since": info.held_since,
-        }
-        for info in registry.snapshot()
-    ])
+    return locks_response(request)
 
 
 @api_router.post(
@@ -151,5 +143,4 @@ async def force_unlock_lock(
         cleared), ``{"ok": false}`` if nothing was held there.
 
     """
-    freed = await _get_lock_registry(request).force_unlock(scope)
-    return JSONResponse({"ok": freed})
+    return await force_unlock_response(request, scope)
