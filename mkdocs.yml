@@ -14,6 +14,7 @@ nav:
       - Configuration: usage/configuration.md
       - Authentication: usage/authentication.md
       - Permissions: usage/permissions.md
+      - Node Identity: usage/node_identity.md
       - Health Check: usage/health.md
   - API reference:
       - oqtopus-manager: reference/

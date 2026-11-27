@@ -36,7 +36,7 @@ The Settings page also shows, read-only:
 
 ## server
 
-Controls the HTTP server binding and the locations of environment data files.
+Controls the HTTP server binding and the locations of environment and node data files.
 
 ```yaml
 server:
@@ -44,6 +44,7 @@ server:
   port: 38000
   default_environment_base_path: ./environments
   environments_file: ./config/environments.yaml
+  nodes_file: ./config/nodes.yaml
 ```
 
 | Key | Type | Required | Default | Description |
@@ -52,6 +53,7 @@ server:
 | `port` | integer | **Yes** | — | TCP port the HTTP server listens on. |
 | `default_environment_base_path` | path | **Yes** | — | Directory where environment folders are stored when `root_path` is not specified per-environment. Relative paths are resolved from the working directory. |
 | `environments_file` | path | **Yes** | — | YAML file that stores the list of registered environments. Created automatically on first use. |
+| `nodes_file` | path | No | `./config/nodes.yaml` | YAML file that stores this Manager instance's [node identity](node_identity.md). Created on first startup. Relative paths are resolved from the working directory. |
 
 !!! warning "`host: 0.0.0.0` exposes the application"
     By default, `auth.provider` is `none`, meaning anyone who can reach the server can create, delete, and

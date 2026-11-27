@@ -1,7 +1,7 @@
 # Health Check
 
-`GET /health` reports liveness and version information for a single OQTOPUS Manager
-instance. It is intended for automated reachability checks.
+`GET /health` reports liveness, version, and node identity for a single OQTOPUS
+Manager instance. It is intended for automated reachability checks.
 
 ## Response
 
@@ -14,7 +14,8 @@ Content-Type: application/json
 {
   "status": "pass",
   "version": "0.1.0",
-  "description": "OQTOPUS Manager"
+  "description": "OQTOPUS Manager",
+  "serviceId": "0193f2a7-8c31-7b4e-9f02-6d1a5c8e4b77"
 }
 ```
 
@@ -23,10 +24,12 @@ Content-Type: application/json
 | `status` | string | Always `"pass"`. OQTOPUS Manager does not currently self-report degraded states (`warn`/`fail`); a non-`200` response or a connection failure is the signal for "not reachable". |
 | `version` | string | The installed `oqtopus-manager` package version (`importlib.metadata.version("oqtopus-manager")`, exposed as `request.app.version`). |
 | `description` | string | The configured `appearance.app_name` (`request.app.title`). |
+| `serviceId` | string | The `node_id` from the self entry in `nodes.yaml`. Always present. See [Node Identity](node_identity.md). |
 
 `GET /health` always returns `200`. There is no permission check and no way to
 disable it short of removing the route; it is intended to be always reachable
-whenever the process is up.
+whenever the process is up. The Manager keeps the node ID in memory after startup,
+so changes to `nodes.yaml` take effect only after a restart.
 
 ## Authentication
 
@@ -39,7 +42,7 @@ exclusion works and why `/favicon.ico` and `/app-icon` are excluded the same way
 
 ### Why draft-inadarei-api-health-check-06?
 
-The response field names and their meaning (`status`, `version`, `description`)
+The response field names and their meaning (`status`, `version`, `description`, `serviceId`)
 follow [draft-inadarei-api-health-check-06](https://datatracker.ietf.org/doc/html/draft-inadarei-api-health-check-06),
 an IETF Individual Internet-Draft for health check responses. The draft expired
 without becoming an RFC, but its vocabulary has been adopted informally by a number

@@ -4,6 +4,7 @@ server:
   port: 38000
   default_environment_base_path: ./environments
   environments_file: ./config/environments.yaml
+  nodes_file: ./config/nodes.yaml   # Node identity file created on first startup. Edit only its name.
 
 # Behavior settings: screen behavior tuning (buffer sizes, timeouts, feature flags)
 behavior:
