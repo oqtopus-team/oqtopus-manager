@@ -531,14 +531,46 @@ def test_create_app_with_unsupported_template_raises(
         create_app(cfg_path)
 
 
-def test_health_endpoint(client: TestClient) -> None:
+def test_health_endpoint(client: TestClient, tmp_path: pathlib.Path) -> None:
+    nodes_file = tmp_path / "config/nodes.yaml"
+    node_id = yaml.safe_load(nodes_file.read_text(encoding="utf-8"))["nodes"][0]["node_id"]
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "pass"
     assert "version" in body
     assert "description" in body
-    assert "serviceId" not in body
+    assert body["serviceId"] == node_id
+
+    nodes_file.write_text("nodes: [", encoding="utf-8")
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["serviceId"] == node_id
+
+
+def test_create_app_fails_on_invalid_nodes_file(
+    config_path: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    nodes_file = tmp_path / "config/nodes.yaml"
+    nodes_file.parent.mkdir()
+    invalid = b"nodes: []\n"
+    nodes_file.write_bytes(invalid)
+
+    with pytest.raises(ValueError, match="nodes.yaml has no valid self entry"):
+        create_app(config_path)
+
+    assert nodes_file.read_bytes() == invalid
+
+
+def test_create_app_without_oqtopus_cli(
+    config_path: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    empty_path = tmp_path / "bin"
+    empty_path.mkdir()
+    monkeypatch.setenv("PATH", str(empty_path))
+
+    app = create_app(config_path)
+    assert app.state.self_node.node_id
 
 
 def test_app_icon_404_when_not_configured(client: TestClient) -> None:

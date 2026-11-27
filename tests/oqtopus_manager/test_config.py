@@ -61,6 +61,21 @@ def test_load_resolves_relative_paths_from_cwd(tmp_path: pathlib.Path, monkeypat
     cfg = AppConfig.load(config_path)
     assert cfg.default_environment_base_path == (tmp_path / "environments").resolve()
     assert cfg.environments_file == (tmp_path / "environments.yaml").resolve()
+    assert cfg.nodes_file == tmp_path / "config/nodes.yaml"
+
+
+def test_load_resolves_custom_nodes_file_from_cwd(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config_dir = tmp_path / "settings"
+    config_dir.mkdir()
+    config_path = _write_config(config_dir)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["server"]["nodes_file"] = "./data/nodes.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    assert AppConfig.load(config_path).nodes_file == tmp_path / "data/nodes.yaml"
 
 
 def test_host_port_reads_from_config(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

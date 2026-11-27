@@ -171,6 +171,8 @@ cython_debug/
 #   environments.yaml is generated/updated at runtime when environments are
 #   created or deleted through the web UI.
 /config/environments.yaml
+#   nodes.yaml stores the instance identity generated on first startup.
+/config/nodes.yaml
 #   Default base path for managed OQTOPUS environments (server.default_environment_base_path).
 /environments/
 

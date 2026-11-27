@@ -19,6 +19,7 @@ from oqtopus_manager.routers import backend as backend_pkg
 from oqtopus_manager.routers import cloud_local as cloud_local_pkg
 from oqtopus_manager.services.environment import check_reserved_environment_names
 from oqtopus_manager.services.locks import LockRegistry
+from oqtopus_manager.services.nodes import ensure_self_node
 from oqtopus_manager.services.operations import OperationRegistry
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,8 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
         The configured FastAPI application instance.
 
     Raises:
-        ValueError: If no environment_templates are defined in config, or if
-            an unsupported template name is listed.
+        ValueError: If environment templates are missing or unsupported, or if
+            the node identity cannot be loaded or created.
 
     """
     cfg = AppConfig.load(config_path)
@@ -70,6 +71,8 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
             reserved_collisions,
         )
 
+    self_node = ensure_self_node(cfg)
+
     # Initialize FastAPI and attach config/templates to app state
     app = FastAPI(
         title=cfg.app_name,
@@ -77,6 +80,7 @@ def create_app(config_path: pathlib.Path) -> FastAPI:
     )
     app.add_middleware(AuthMiddleware, auth_cfg=cfg.auth)
     app.state.config = cfg
+    app.state.self_node = self_node
     app.state.lock_registry = LockRegistry()
     app.state.operation_registry = OperationRegistry(cfg.operation_buffer_lines)
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)

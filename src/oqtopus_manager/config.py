@@ -27,6 +27,7 @@ class AppConfig(BaseModel):
     config_path: pathlib.Path
     default_environment_base_path: pathlib.Path
     environments_file: pathlib.Path
+    nodes_file: pathlib.Path
     host: str
     port: int
     log_tail_lines: int
@@ -68,12 +69,14 @@ class AppConfig(BaseModel):
         auth = parse_auth_config(raw.get("auth", {}))
         default_base = cwd / pathlib.Path(server["default_environment_base_path"])
         environments_file = cwd / pathlib.Path(server["environments_file"])
+        nodes_file = cwd / pathlib.Path(server.get("nodes_file", "./config/nodes.yaml"))
 
         return cls(
             config_path=config_path.resolve(),
             enable_debug_endpoint=bool(raw["enable_debug_endpoint"]),
             default_environment_base_path=default_base.resolve(),
             environments_file=environments_file.resolve(),
+            nodes_file=nodes_file.resolve(),
             host=server["host"],
             port=server["port"],
             log_tail_lines=behavior["log_tail_lines"],

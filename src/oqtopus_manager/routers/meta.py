@@ -19,21 +19,22 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     description: str
-    serviceId: str | None = None  # ruff: ignore[mixed-case-variable-in-class-scope] — draft field name; fleet node_id, added later
+    serviceId: str  # ruff: ignore[mixed-case-variable-in-class-scope] — draft field name for the local node_id
 
 
 @router.get("/health", response_model=HealthResponse, response_model_exclude_none=True)
 async def health(request: Request) -> HealthResponse:
-    """Return liveness/version info for fleet reachability checks.
+    """Return liveness, version, and node identity for reachability checks.
 
     Returns:
-        HealthResponse with a fixed ``pass`` status and the package version.
+        HealthResponse with a fixed ``pass`` status, package version, and node ID.
 
     """
     return HealthResponse(
         status="pass",
         version=request.app.version,
         description=request.app.title,
+        serviceId=request.app.state.self_node.node_id,
     )
 
 
